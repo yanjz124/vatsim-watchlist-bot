@@ -110,7 +110,6 @@ Logging & troubleshooting:
 Advanced: you can run the bot inside a Docker container or supervise it with process managers (supervisord, pm2). The simplest approach is systemd for Linux hosts.
 
 ## Customization
-- Personal/custom modules and features have been removed from defaults (karma, WWV, voice modules).
 - Admin-only commands check for `ADMIN_ID`. Set this env var to enable administrative control.
 
 ## Admin / Auto-update
