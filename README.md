@@ -53,6 +53,62 @@ python bot.py
 
 The bot will load the included `extensions/` modules by default. To change which extensions are loaded, edit `bot.py`.
 
+## Creating a Discord Bot (quick start)
+1. Go to the Discord Developer Portal: https://discord.com/developers/applications and create a new Application.
+2. In the application page open the **Bot** tab and click **Add Bot**. Under the **Token** section click **Reset Token** (or **Copy**) and save the token — this becomes your `DISCORD_TOKEN`.
+3. Under **OAuth2 → URL Generator** select the `bot` scope and (optionally) `applications.commands` if you plan to use slash commands. In **Bot Permissions** choose the permissions your server needs (see next section). Copy the generated invite URL and open it to invite the bot to a server you administer.
+
+## Permissions & Intents
+- Required minimum permissions: **View Channels**, **Send Messages**, **Embed Links**, **Read Message History**. These let the bot read and post messages and send embeds.
+- Optional permissions depends on features: **Manage Messages** (for moderation-related commands), **Manage Roles** (if extensions modify roles), or **Administrator** (not recommended).
+- Privileged Gateway Intents: If your bot needs member lookups or tracks presence, enable **Server Members Intent** and/or **Presence Intent** in the bot page of the Developer Portal. Then enable the same intents in code. Example (discord.py):
+
+```python
+import discord
+intents = discord.Intents.default()
+intents.members = True  # enable if you enabled Server Members Intent in the portal
+bot = discord.Bot(intents=intents)  # or commands.Bot(..., intents=intents)
+```
+
+- How to get your numeric Discord user id (for `ADMIN_ID`): enable Developer Mode in Discord (Appearance → Advanced → Developer Mode), then right-click your username in a server or the members list and choose **Copy ID**.
+
+## Hosting & Running
+Basic local run (Linux/macOS):
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+# set environment variables (or create a .env file)
+python bot.py
+```
+
+Basic local run (Windows PowerShell):
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python bot.py
+```
+
+Systemd (example): copy `systemd/vatsim-watchlist-bot.service.example` to `/etc/systemd/system/vatsim-watchlist-bot.service`, edit `User`, `WorkingDirectory`, and `ExecStart` to point at your install path and python interpreter (virtualenv), then:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable vatsim-watchlist-bot.service
+sudo systemctl start vatsim-watchlist-bot.service
+sudo journalctl -u vatsim-watchlist-bot.service -f
+```
+
+Logging & troubleshooting:
+- Check `systemctl status vatsim-watchlist-bot.service` and `journalctl -u vatsim-watchlist-bot.service` for runtime errors.
+- Ensure `DISCORD_TOKEN` is correct and that required API keys (Mapbox, VATUSA, etc.) are set if you use related features.
+
+Advanced: you can run the bot inside a Docker container or supervise it with process managers (supervisord, pm2). The simplest approach is systemd for Linux hosts.
+
 ## Customization
 - Personal/custom modules and features have been removed from defaults (karma, WWV, voice modules).
 - Admin-only commands check for `ADMIN_ID`. Set this env var to enable administrative control.
