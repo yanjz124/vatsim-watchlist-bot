@@ -158,6 +158,25 @@ Below is a summary of the bot's built-in commands, grouped by extension. Use the
 	- `!facroster <FACILITY> [home/visit/both]`: Show facility roster.
 	- `!metar <ICAO>`: Fetch METAR for an airport.
 
+- **Monitors**
+	- **Callsign Monitor (`extensions/callsign_monitor.py`)**
+		- `!csmon`: Show usage for callsign monitoring (group command).
+		- `!csmon add <RULE> <NAME(optional)>`: Add a callsign rule (e.g., `CXK*`).
+		- `!csmon remove <RULE>`: Remove a monitored callsign rule.
+		- `!csmon list`: List currently monitored callsign rules (paged).
+
+	- **Type Monitor (`extensions/type_monitor.py`)**
+		- `!typemon`: Show usage for aircraft type monitoring (group command).
+		- `!typemon add <PATTERN> <NAME(optional)>`: Add an aircraft type pattern (e.g., `B738`, `A320*`).
+		- `!typemon remove <PATTERN>`: Remove an aircraft type pattern.
+		- `!typemon list`: List currently monitored aircraft types (paged).
+
+	- **CID Monitor (`extensions/cid_monitor.py`)**
+		- `!cidmon`: Show usage for CID monitoring (group command).
+		- `!cidmon add <CID1> name1(optional), <CID2> name2(optional),...`: Add one or more CIDs to monitor.
+		- `!cidmon remove <CID>`: Remove a CID from monitoring.
+		- `!cidmon list`: List currently monitored CIDs (paged).
+
 - **Code-of-Conduct / Monitoring (`extensions/coc_monitor.py`)**
 	- `!cocmonitor [on|off]`: Toggle CoC real-time monitoring.
 	- `!cocreset`: Reset the CoC alert cache.
