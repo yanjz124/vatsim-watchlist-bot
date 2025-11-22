@@ -1,14 +1,12 @@
-# VATSIM Watchlist Bot (Public Fork)
+# VATSIM Watchlist Bot
 
-This repository contains a Discord bot that monitors VATSIM data and provides useful alerts and utilities for controllers and pilots. This is a cleaned, public-friendly fork intended for easy deployment and customization.
+This repository contains a Discord bot that monitors VATSIM data and provides useful alerts and utilities for controllers and pilots. It is designed to be configurable and easy to deploy.
 
 ## Features
 - VATSIM data monitoring and notifications
 - CID/callsign/type monitors with persistent JSON-backed state
 - P56 monitor support (local API integration)
 - Moderation / CoC tools (optional)
-
-This fork removes personal or private features (personal karma, owner-specific shortcuts, voice/WWV audio features) and replaces private IDs with configurable environment variables.
 
 ## Requirements
 - Python 3.9+
@@ -55,7 +53,7 @@ python bot.py
 
 The bot will load the included `extensions/` modules by default. To change which extensions are loaded, edit `bot.py`.
 
-## Making the Bot Public-Friendly
+## Customization
 - Personal/custom modules and features have been removed from defaults (karma, WWV, voice modules).
 - Admin-only commands check for `ADMIN_ID`. Set this env var to enable administrative control.
 
@@ -72,9 +70,6 @@ Usage examples (on Discord):
 
 ## Disabling Optional Features
 - Some extensions expect API keys (Mapbox, VATUSA). If you don't set those environment variables, the corresponding commands will be disabled or return an error message.
-
-## Pruning Unused Dependencies
-- This public fork removes audio/voice features from the default load list; `PyNaCl` and `pydub` were removed from `requirements.txt`. If you add voice/audio modules later, re-add the appropriate packages.
 
 ## Troubleshooting
 - If the bot refuses to start, check `DISCORD_TOKEN` and that the Python version is compatible (3.9+).
@@ -138,4 +133,4 @@ If you'd like I can generate a markdown-formatted `!help` output that matches th
 If you add new extensions, place them in `extensions/` and add them to the `extensions` list in `bot.py` if you want them loaded by default.
 
 ## License
-This fork is provided as-is for public use. Please add a license file if you intend to publish it on GitHub.
+This repository is provided as-is. See `LICENSE` for licensing information.

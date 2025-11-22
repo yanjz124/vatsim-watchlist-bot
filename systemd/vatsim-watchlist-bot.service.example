@@ -1,0 +1,38 @@
+[Unit]
+Description=VATSIM Watchlist Bot (example)
+After=network.target
+
+[Service]
+# Adjust User/Group and WorkingDirectory to your install path
+User=bot
+Group=bot
+WorkingDirectory=/opt/vatsim-watchlist-bot
+
+# If you're using a virtualenv, set ExecStart to the venv python path, e.g.
+# ExecStart=/opt/vatsim-watchlist-bot/.venv/bin/python /opt/vatsim-watchlist-bot/bot.py
+ExecStart=/usr/bin/python3 /opt/vatsim-watchlist-bot/bot.py
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+[Unit]
+Description=VATSIM Watchlist Bot
+After=network.target
+
+[Service]
+# Adjust User/Group and WorkingDirectory to your install path
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/vatsim-watchlist-bot
+
+# If you're using a virtualenv, set ExecStart to the venv python path, e.g.
+# ExecStart=/home/pi/vatsim-watchlist-bot/.venv/bin/python /home/pi/vatsim-watchlist-bot/bot.py
+ExecStart=/usr/bin/python3 /home/pi/vatsim-watchlist-bot/bot.py
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

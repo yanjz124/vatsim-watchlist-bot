@@ -1,16 +1,16 @@
 [Unit]
-Description=LarperDetector Discord bot
+Description=VATSIM Watchlist Bot (example)
 After=network.target
 
 [Service]
 # Adjust User/Group and WorkingDirectory to your install path
-User=pi
-Group=pi
-WorkingDirectory=/home/pi/LarperDetectorV3
+User=bot
+Group=bot
+WorkingDirectory=/opt/vatsim-watchlist-bot
 
 # If you're using a virtualenv, set ExecStart to the venv python path, e.g.
-# ExecStart=/home/pi/LarperDetectorV3/.venv/bin/python /home/pi/LarperDetectorV3/bot.py
-ExecStart=/usr/bin/python3 /home/pi/LarperDetectorV3/bot.py
+# ExecStart=/opt/vatsim-watchlist-bot/.venv/bin/python /opt/vatsim-watchlist-bot/bot.py
+ExecStart=/usr/bin/python3 /opt/vatsim-watchlist-bot/bot.py
 
 Restart=on-failure
 RestartSec=5

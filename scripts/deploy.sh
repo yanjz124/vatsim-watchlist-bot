@@ -22,17 +22,17 @@ echo "Installing requirements..."
 python -m pip install --upgrade pip
 python -m pip install -r "$REPO_DIR/requirements.txt"
 
-echo "Restarting systemd service: larperdetector.service"
-echo "Restarting systemd service: larperdetector.service"
+echo "Restarting systemd service: vatsim-watchlist-bot.service"
+echo "Restarting systemd service: vatsim-watchlist-bot.service"
 # If running as root, restart directly. Otherwise attempt a sudo restart non-interactively.
 if [ "$(id -u)" -eq 0 ]; then
-    systemctl restart larperdetector.service || {
+    systemctl restart vatsim-watchlist-bot.service || {
         echo "Failed to restart service as root. Check service name and logs."
         exit 1
     }
 else
     # Try to restart via sudo without prompting for password. If sudo would prompt, fail with actionable message.
-    if sudo -n /bin/systemctl restart larperdetector.service 2>/dev/null; then
+    if sudo -n /bin/systemctl restart vatsim-watchlist-bot.service 2>/dev/null; then
         echo "Service restarted via sudo."
     else
         echo "Failed to restart service via sudo without a password."
@@ -40,10 +40,10 @@ else
         echo
         echo "  # Run on the server as root (adjust user if needed)"
         echo "  USERNAME=$(whoami)" 
-        echo "  echo \"\$USERNAME ALL=(root) NOPASSWD: /bin/systemctl restart larperdetector.service\" | sudo tee /etc/sudoers.d/larperdetector"
-        echo "  sudo chmod 440 /etc/sudoers.d/larperdetector"
+        echo "  echo \"\$USERNAME ALL=(root) NOPASSWD: /bin/systemctl restart vatsim-watchlist-bot.service\" | sudo tee /etc/sudoers.d/vatsim-watchlist-bot"
+        echo "  sudo chmod 440 /etc/sudoers.d/vatsim-watchlist-bot"
         echo
-        echo "Alternatively, run this script as root or restart the service manually: sudo systemctl restart larperdetector.service"
+        echo "Alternatively, run this script as root or restart the service manually: sudo systemctl restart vatsim-watchlist-bot.service"
         exit 2
     fi
 fi

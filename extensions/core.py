@@ -37,7 +37,6 @@ class Core(commands.Cog):
         if not hasattr(self.bot, 'session'):
             self.bot.session = aiohttp.ClientSession()
 
-        # No per-user default karma in the public fork.
 
     @commands.Cog.listener()
     async def on_message(self, message):
