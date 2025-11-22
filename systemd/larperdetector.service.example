@@ -1,0 +1,19 @@
+[Unit]
+Description=LarperDetector Discord bot
+After=network.target
+
+[Service]
+# Adjust User/Group and WorkingDirectory to your install path
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/LarperDetectorV3
+
+# If you're using a virtualenv, set ExecStart to the venv python path, e.g.
+# ExecStart=/home/pi/LarperDetectorV3/.venv/bin/python /home/pi/LarperDetectorV3/bot.py
+ExecStart=/usr/bin/python3 /home/pi/LarperDetectorV3/bot.py
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

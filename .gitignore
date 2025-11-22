@@ -1,0 +1,28 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Environment variables / secrets
+.env
+
+# Data files (if they contain runtime-modified values)
+/data/
+
+# VSCode / PyCharm / IDE files
+.vscode/
+.idea/
+
+# Logs / dumps
+*.log
+*.bak
+
+# OS / system files
+.DS_Store
+Thumbs.db
