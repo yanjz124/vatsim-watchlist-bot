@@ -16,7 +16,12 @@ class CocMonitorLoop(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.enabled = True  # Default to enabled
-        self.a4_muted = False  # A4 violation alerts can be muted
+        # Default A4 violation alerts to muted unless explicitly enabled
+        try:
+            from utils.data_manager import load_a4_muted
+            self.a4_muted = load_a4_muted()
+        except Exception:
+            self.a4_muted = True
         self.alerted_users = set()  # Track CID+callsign combinations already alerted
         self.a1_status_cache = {}  # Track A1 keyword matches
         self.a9_status_cache = {}  # Track A9 keyword matches

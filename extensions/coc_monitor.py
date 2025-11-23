@@ -182,6 +182,8 @@ class CocMonitor(commands.Cog):
             await ctx.send("CoC monitor loop is not loaded.")
             return
         
+        from utils.data_manager import save_a4_muted
+
         if action is None or action.lower() == "status":
             status = "muted" if coc_loop.a4_muted else "unmuted"
             await ctx.send(f"A4 violation alerts are currently **{status}**.")
@@ -190,9 +192,17 @@ class CocMonitor(commands.Cog):
         action = action.lower()
         if action in ["mute", "off", "disable"]:
             coc_loop.a4_muted = True
+            try:
+                save_a4_muted(True)
+            except Exception:
+                pass
             await ctx.send("A4 violation alerts are now **muted**. Use `!a4mon unmute` to re-enable.")
         elif action in ["unmute", "on", "enable"]:
             coc_loop.a4_muted = False
+            try:
+                save_a4_muted(False)
+            except Exception:
+                pass
             await ctx.send("A4 violation alerts are now **unmuted**.")
         else:
             await ctx.send("Invalid option. Use `!a4mon mute`, `!a4mon unmute`, or `!a4mon status`.")

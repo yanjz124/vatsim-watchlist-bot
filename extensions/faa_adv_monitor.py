@@ -12,6 +12,7 @@ import discord
 from discord.ext import commands, tasks
 
 from config import CHANNEL_ID
+from utils.data_manager import load_faa_muted, save_faa_muted
 
 
 ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -45,6 +46,11 @@ class FAAAdvMonitor(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.seen = _load_seen()
+        # Load persisted muted state (default: muted)
+        try:
+            self.muted = load_faa_muted()
+        except Exception:
+            self.muted = True
         self.session = aiohttp.ClientSession()
         self.faa_loop.start()
 
@@ -58,6 +64,9 @@ class FAAAdvMonitor(commands.Cog):
 
     @tasks.loop(minutes=10)
     async def faa_loop(self):
+        # Respect mute setting: do not post automatically when muted
+        if getattr(self, "muted", True):
+            return
         try:
             async with self.session.get(LIST_URL, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                 if resp.status != 200:
@@ -140,6 +149,24 @@ class FAAAdvMonitor(commands.Cog):
                `!faaadv new` — posts up to 5 advisories not seen before and marks them seen
                `!faaadv new 10` — post up to 10 new advisories
         """
+        # Support mute/unmute/status for the FAA monitor
+        if mode:
+            m = mode.lower()
+            if m in ("mute", "off", "disable"):
+                save_faa_muted(True)
+                self.muted = True
+                await ctx.send("FAA advisory auto-posting is now **muted**. Use `!faaadv unmute` to re-enable.")
+                return
+            if m in ("unmute", "on", "enable"):
+                save_faa_muted(False)
+                self.muted = False
+                await ctx.send("FAA advisory auto-posting is now **unmuted**.")
+                return
+            if m == "status":
+                status = "muted" if getattr(self, "muted", True) else "unmuted"
+                await ctx.send(f"FAA advisory auto-posting is currently **{status}**.")
+                return
+
         # Debug: announce locally that the command was invoked (helps diagnose permissions / handler execution)
         print(f"faaadv invoked by {ctx.author} in #{getattr(ctx.channel, 'name', ctx.channel)} mode={mode} limit={limit}", flush=True)
 

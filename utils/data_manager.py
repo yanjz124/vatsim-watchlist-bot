@@ -200,3 +200,25 @@ def save_p56_seen_events(seen_events):
     data = load_json('p56_monitor.json')
     data['seen_events'] = list(seen_events)
     save_json('p56_monitor.json', data)
+
+
+# === FAA Adv Monitor mute state ===
+def load_faa_muted():
+    data = load_json('faa_monitor.json')
+    return data.get('muted', True)
+
+def save_faa_muted(muted):
+    data = load_json('faa_monitor.json')
+    data['muted'] = bool(muted)
+    save_json('faa_monitor.json', data)
+
+
+# === A4 Monitor mute state (CoC) ===
+def load_a4_muted():
+    data = load_json('a4_monitor.json')
+    return data.get('muted', True)
+
+def save_a4_muted(muted):
+    data = load_json('a4_monitor.json')
+    data['muted'] = bool(muted)
+    save_json('a4_monitor.json', data)
