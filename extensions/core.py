@@ -154,6 +154,85 @@ class Core(commands.Cog):
             await ctx.send("No requirements.txt found; skipping pip install.")
 
     @commands.command()
+    async def restartlinux(self, ctx):
+        """Update and restart the bot on Linux (admin only)."""
+        if ctx.author.id != ADMIN_ID:
+            await ctx.send("Unauthorized.")
+            return
+        # Run git pull
+        result = await asyncio.to_thread(
+            subprocess.run,
+            ["git", "pull"],
+            capture_output=True,
+            text=True,
+        )
+
+        pull_output = (result.stdout or "").strip()
+        if result.stderr:
+            pull_output += "\n" + result.stderr.strip()
+
+        await ctx.send(f"Git pull result:\n```{pull_output[:1800]}```")
+
+        if "Already up to date" not in pull_output:
+            # Show recent commits
+            log_result = subprocess.run(
+                ["git", "log", "--oneline", "-3"],
+                capture_output=True,
+                text=True,
+            )
+            log_output = log_result.stdout.strip()
+            if log_output:
+                await ctx.send(f"Recent commits:\n```{log_output}```")
+
+            # Show changed files summary
+            stat_result = subprocess.run(
+                ["git", "diff", "--stat", "HEAD~3..HEAD"],
+                capture_output=True,
+                text=True,
+            )
+            stat_output = stat_result.stdout.strip()
+            if stat_output:
+                await ctx.send(f"Changes summary:\n```{stat_output}```")
+
+        self.save_data()
+
+        # Install requirements
+        req_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "requirements.txt",
+        )
+
+        if os.path.exists(req_path):
+            await ctx.send("Installing requirements before restart...")
+            pip_res = await asyncio.to_thread(
+                subprocess.run,
+                [sys.executable, "-m", "pip", "install", "-r", req_path],
+                capture_output=True,
+                text=True,
+            )
+
+            pip_out = (pip_res.stdout or "") + ("\n" + pip_res.stderr if pip_res.stderr else "")
+
+            if pip_res.returncode != 0:
+                await ctx.send(f"Pip install FAILED:\n```{pip_out[:1800]}```")
+            else:
+                installed = []
+                m = re.search(r"Successfully installed (.+)", pip_out)
+                if m:
+                    installed.extend(m.group(1).strip().split())
+                else:
+                    m2 = re.search(r"Installing collected packages: (.+)", pip_out)
+                    if m2:
+                        installed.extend([p.strip().strip(',') for p in m2.group(1).split(',')])
+
+                if installed:
+                    await ctx.send(f"Pip installed: {', '.join(installed)}")
+
+        # Trigger systemd restart
+        await ctx.send("Restarting bot via systemd...")
+        os._exit(1)  # systemd sees this as a failure → restarts bot
+
+    @commands.command()
     async def shutdown(self, ctx):
         """Shut down the bot (admin only)"""
         if ctx.author.id != ADMIN_ID:
