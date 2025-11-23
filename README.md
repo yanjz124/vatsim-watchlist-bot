@@ -189,6 +189,7 @@ Below is a summary of the bot's built-in commands, grouped by extension. Use the
 
 - **FAA / Advisories (`extensions/faa_adv_monitor.py`, `extensions/faa_restrictions.py`)**
 	- `!faaadv [new] [limit]`: Fetch FAA advisories. `new` shows only unseen advisories; `limit` controls how many to post.
+	- `!faaadv [mute|unmute|status]`: Manage automatic FAA advisory auto-posting. By default automatic FAA postings are **muted**; use `!faaadv unmute` to enable posting. `!faaadv status` shows current state.
 	- `!faares [REQUESTING] [PROVIDING]`: Fetch compact FAA restriction entries (defaults to ALL/ALL).
 	- `!faaresmon [REQUESTING] [PROVIDING]` / `!faaresmon STOP`: Start or stop a per-minute FAA restrictions monitor.
 
@@ -200,6 +201,10 @@ Below is a summary of the bot's built-in commands, grouped by extension. Use the
 	- `!sys` (aliases: `!piusage`, `!sysstats`, `!sysinfo`): Show CPU, memory, disk, network, uptime and top processes (requires `psutil`).
 
 If a command is admin-only, the bot will reply that you are unauthorized unless your user id matches `ADMIN_ID` or you have the necessary Discord permissions (as documented for `!installext`).
+
+Note on defaults and persistence:
+- The FAA automatic advisory poster and the CoC A4 real-time alerts are **muted by default** on first run to avoid unexpected spam in a server. Use `!faaadv unmute` to enable FAA auto-posting and `!a4mon unmute` to enable A4 violation alerts.
+- Mute/unmute changes for FAA (`!faaadv`) and A4 (`!a4mon`) are persisted to disk so the chosen state survives restarts.
 
 If you'd like I can generate a markdown-formatted `!help` output that matches the bot's built-in `!help` command and add it as `docs/commands.md` for easy browsing.
 
