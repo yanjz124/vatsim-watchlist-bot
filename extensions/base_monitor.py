@@ -1,0 +1,265 @@
+# extensions/base_monitor.py
+
+import discord
+from discord.ext import commands
+from config import atc_rating, pilot_rating, CHANNEL_ID
+from utils import fetch_vatsim_data, build_status_embed
+import time
+
+
+class VatsimMonitorLoop(commands.Cog):
+    """Base class for VATSIM monitor loops that share fingerprinting,
+    change detection, embed management, and disconnection handling."""
+
+    # Subclass configuration
+    INCLUDE_CONTROLLERS = True
+    ENABLE_MAP_REFRESH = True
+    ATC_REFRESH_INTERVAL = 600
+    PILOT_REFRESH_INTERVAL = 300
+
+    def __init__(self, bot):
+        self.bot = bot
+        self.status_cache = {}
+        self.message_cache = {}
+        self.last_map_refresh = {}
+
+    # === Abstract methods (subclass MUST implement) ===
+
+    def load_config(self):
+        """Return the monitoring config (dict or list)."""
+        raise NotImplementedError
+
+    def match_clients(self, pilots, controllers):
+        """Return {key: [client_data, ...]} of matched clients."""
+        raise NotImplementedError
+
+    def get_display_name(self, key, client_data):
+        """Return display name for a given monitoring key."""
+        raise NotImplementedError
+
+    def get_offline_description(self, key):
+        """Return (title, description) for the offline embed."""
+        raise NotImplementedError
+
+    # === Shared methods ===
+
+    def build_fingerprint(self, client_data):
+        """Build fingerprint dict from client data.
+        Returns (base_fp, rating, is_atc)."""
+        source = client_data.get("_source", "unknown")
+        is_atc = (source == "controller")
+        callsign = client_data.get("callsign", "N/A")
+        rating_id = client_data.get("rating") if is_atc else client_data.get("pilot_rating", -1)
+        rating = (atc_rating if is_atc else pilot_rating).get(rating_id, f"Unknown ({rating_id})")
+        server = client_data.get("server", "N/A")
+        start_time = client_data.get("logon_time")
+
+        if is_atc:
+            atis_list = client_data.get("text_atis", []) or []
+            base_fp = {
+                "status": source,
+                "callsign": callsign,
+                "rating": rating,
+                "server": server,
+                "start_time": start_time,
+                "frequency": client_data.get("frequency"),
+                "facility": client_data.get("facility"),
+                "visual_range": client_data.get("visual_range"),
+                "text_atis": "\n".join(atis_list),
+                "last_updated": client_data.get("last_updated"),
+                "atis_code": client_data.get("atis_code"),
+            }
+        else:
+            fp = client_data.get("flight_plan") or {}
+            aircraft = fp.get("aircraft_short") or fp.get("aircraft_faa") or fp.get("aircraft")
+            base_fp = {
+                "status": source,
+                "callsign": callsign,
+                "rating": rating,
+                "server": server,
+                "start_time": start_time,
+                "transponder": client_data.get("transponder"),
+                "assigned_transponder": fp.get("assigned_transponder"),
+                "aircraft": aircraft,
+                "flight_rules": fp.get("flight_rules"),
+                "departure": fp.get("departure"),
+                "arrival": fp.get("arrival"),
+                "alternate": fp.get("alternate"),
+                "cruise_tas": fp.get("cruise_tas"),
+                "altitude": fp.get("altitude"),
+                "deptime": fp.get("deptime"),
+                "enroute_time": fp.get("enroute_time"),
+                "fuel_time": fp.get("fuel_time"),
+                "route": fp.get("route"),
+                "remarks": fp.get("remarks"),
+            }
+
+        return base_fp, rating, is_atc
+
+    def detect_changes(self, key, base_fp):
+        """Compare fingerprint against cache, return (fingerprint_with_meta, old_fp_list)."""
+        old_fp_list = self.status_cache.get(key, [])
+        old_fp = old_fp_list[0] if old_fp_list else None
+        now_epoch = int(time.time())
+
+        if not old_fp:
+            changed_keys = ["initial"]
+        else:
+            changed_keys = sorted([k for k in base_fp if base_fp.get(k) != old_fp.get(k)])
+
+        fingerprint = dict(base_fp)
+        fingerprint["updated_keys"] = changed_keys
+        fingerprint["updated_at"] = now_epoch
+        return fingerprint, old_fp_list
+
+    async def send_or_update_embed(self, key, client_data, display_name, rating, is_atc, fingerprint, base_fp, old_fp_list):
+        """Send new embed or edit existing one on change."""
+        channel = self.bot.get_channel(CHANNEL_ID)
+        if not channel:
+            return
+
+        if not old_fp_list:
+            embed, file = await build_status_embed(
+                client_data=client_data,
+                display_name=display_name,
+                rating=rating,
+                is_atc=is_atc,
+                fingerprint=fingerprint
+            )
+            try:
+                if file:
+                    sent = await channel.send(embed=embed, file=file)
+                else:
+                    sent = await channel.send(embed=embed)
+                self.message_cache[key] = sent
+                if self.ENABLE_MAP_REFRESH:
+                    self.last_map_refresh[key] = time.time()
+            except Exception as e:
+                print(f"Error sending new message for {key}: {e}")
+
+        elif base_fp != old_fp_list[0]:
+            embed, file = await build_status_embed(
+                client_data=client_data,
+                display_name=display_name,
+                rating=rating,
+                is_atc=is_atc,
+                fingerprint=fingerprint
+            )
+            last_msg = self.message_cache.get(key)
+            if last_msg:
+                try:
+                    if file:
+                        await last_msg.edit(embed=embed, attachments=[file])
+                    else:
+                        await last_msg.edit(embed=embed, attachments=[])
+                    if self.ENABLE_MAP_REFRESH:
+                        self.last_map_refresh[key] = time.time()
+                except Exception as e:
+                    print(f"Error editing message for {key}: {e}")
+
+    async def maybe_refresh_map(self, key, client_data, display_name, rating, is_atc, base_fp):
+        """Periodic map refresh without fingerprint changes."""
+        if not self.ENABLE_MAP_REFRESH:
+            return
+
+        refresh_interval = self.ATC_REFRESH_INTERVAL if is_atc else self.PILOT_REFRESH_INTERVAL
+        last_refresh = self.last_map_refresh.get(key, 0)
+        now = time.time()
+
+        if now - last_refresh >= refresh_interval:
+            last_msg = self.message_cache.get(key)
+            channel = self.bot.get_channel(CHANNEL_ID)
+            if channel and last_msg:
+                try:
+                    refresh_fp = dict(self.status_cache.get(key, [base_fp])[0])
+                    refresh_fp["updated_keys"] = ["position"]
+                    refresh_fp["updated_at"] = int(now)
+                    embed, file = await build_status_embed(
+                        client_data=client_data,
+                        display_name=display_name,
+                        rating=rating,
+                        is_atc=is_atc,
+                        fingerprint=refresh_fp
+                    )
+                    if file:
+                        await last_msg.edit(embed=embed, attachments=[file])
+                    else:
+                        await last_msg.edit(embed=embed, attachments=[])
+                    self.last_map_refresh[key] = now
+                except Exception as e:
+                    print(f"Error refreshing map for {key}: {e}")
+
+    async def handle_disconnection(self, key):
+        """Update embed footer to disconnected and send offline notification."""
+        last_msg = self.message_cache.get(key)
+        if last_msg:
+            try:
+                if last_msg.embeds:
+                    old_embed = last_msg.embeds[0]
+                    embed_dict = old_embed.to_dict()
+                    if 'image' in embed_dict:
+                        del embed_dict['image']
+                    new_embed = discord.Embed.from_dict(embed_dict)
+                    new_embed.set_footer(text="Status: Disconnected")
+                    await last_msg.edit(embed=new_embed, attachments=[])
+            except Exception as e:
+                print(f"Error updating embed footer for disconnected {key}: {e}")
+
+        title, description = self.get_offline_description(key)
+        embed = discord.Embed(title=title, description=description, color=discord.Color.red())
+        channel = self.bot.get_channel(CHANNEL_ID)
+        if channel:
+            try:
+                await channel.send(embed=embed)
+            except Exception as e:
+                print(f"Error sending offline message for {key}: {e}")
+
+        self.message_cache.pop(key, None)
+        self.last_map_refresh.pop(key, None)
+
+    async def run_monitor_cycle(self):
+        """Main loop body. Call from the subclass @tasks.loop method."""
+        config = self.load_config()
+        if not config:
+            return
+
+        try:
+            data = await fetch_vatsim_data()
+            if not isinstance(data, dict):
+                return
+            pilots = data.get("pilots", [])
+            controllers = data.get("controllers", []) if self.INCLUDE_CONTROLLERS else []
+        except Exception as e:
+            print(f"Error fetching VATSIM data: {e}")
+            return
+
+        for client in pilots:
+            client["_source"] = "pilot"
+        for client in controllers:
+            client["_source"] = "controller"
+
+        current_matches = self.match_clients(pilots, controllers)
+
+        for key, matched_clients in current_matches.items():
+            if not matched_clients:
+                continue
+
+            client_data = matched_clients[0]
+            display_name = self.get_display_name(key, client_data)
+            base_fp, rating, is_atc = self.build_fingerprint(client_data)
+            fingerprint, old_fp_list = self.detect_changes(key, base_fp)
+
+            await self.send_or_update_embed(
+                key, client_data, display_name, rating, is_atc,
+                fingerprint, base_fp, old_fp_list
+            )
+
+            self.status_cache[key] = [base_fp]
+
+            await self.maybe_refresh_map(key, client_data, display_name, rating, is_atc, base_fp)
+
+        # Disconnections
+        for key in list(self.status_cache.keys()):
+            if key not in current_matches and self.status_cache.get(key):
+                await self.handle_disconnection(key)
+                self.status_cache[key] = []

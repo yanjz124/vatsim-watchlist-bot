@@ -3,6 +3,7 @@ import discord
 from discord.ext import commands
 from config import DISCORD_TOKEN
 import asyncio
+from utils import start_transceivers_cache
 
 intents = discord.Intents.all()
 intents.message_content = True
@@ -30,16 +31,21 @@ extensions = [
     "extensions.newcid_monitor_loop",
     "extensions.type_monitor",
     "extensions.type_monitor_loop",
-    "extensions.p56_monitor_loop"
+    "extensions.p56_monitor_loop",
+    "extensions.workload"
 ]
+
 async def main():
     if not DISCORD_TOKEN:
         raise ValueError("DISCORD_TOKEN is not set in environment variables or config")
     for ext in extensions:
         await bot.load_extension(ext)
+
+    # Start the transceivers cache
+    start_transceivers_cache()
+
     await bot.start(DISCORD_TOKEN)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-

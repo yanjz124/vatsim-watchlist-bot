@@ -1,5 +1,4 @@
 import aiohttp
-import requests
 
 VATSIM_DATA_URL = "https://data.vatsim.net/v3/vatsim-data.json"
 
@@ -17,23 +16,6 @@ async def fetch_vatsim_data():
     except Exception as e:
         print(f"[VATSIM Fetch Error] {e}")
         return None
-
-
-def fetch_transceivers_data():
-    """Fetch and return the transceivers data."""
-    url = "https://data.vatsim.net/v3/transceivers-data.json"
-    response = requests.get(url)
-    response.raise_for_status()
-    return response.json()
-
-
-def get_frequencies_for_callsign(callsign, controller_data):
-    """Return a list of frequency strings for a given controller callsign."""
-    for entry in controller_data:
-        if entry['callsign'].upper() == callsign.upper():
-            transceivers = entry.get('transceivers', [])
-            return [f"{t['frequency'] / 1_000_000:.3f}" for t in transceivers]
-    return None
 
 
 async def fetch_user_name(cid, session=None):

@@ -4,7 +4,6 @@ from datetime import datetime
 
 import aiohttp
 import discord
-import requests
 import asyncio
 import re
 from dateutil import parser
@@ -13,27 +12,10 @@ from typing import Optional
 from discord.ext import commands
 from discord.utils import utcnow
 from utils import generate_map_image
-from utils import fetch_vatsim_data, build_status_embed, format_date, format_time
+from utils import fetch_vatsim_data, build_status_embed, format_date, format_time, get_frequencies_for_callsign
 from config import ROLE_ID, atc_rating, pilot_rating, military_rating, facility, VATUSA_API_KEY
-from utils.vatsim_datafeed import fetch_transceivers_data, get_frequencies_for_callsign
 
 vatsim_url = 'https://data.vatsim.net/v3/vatsim-data.json'
-
-
-# def format_date(iso_string):
-#     if not iso_string:
-#         return "N/A"
-#     try:
-#         return datetime.fromisoformat(iso_string.replace("Z", "+00:00")).strftime("%b %d, %Y")
-#     except Exception:
-#         return iso_string  # fallback
-#
-#
-# def format_time(iso_str):
-#     try:
-#         return parser.isoparse(iso_str).strftime("%Y-%m-%d %H:%MZ")
-#     except Exception:
-#         return iso_str or "N/A"
 
 
 async def fetch_user_name(cid, session=None):
@@ -114,14 +96,13 @@ class Vatsim(commands.Cog):
     async def cid(self, ctx, cid: int):
         """Get VATSIM user info by CID"""
         url = f"https://api.vatsim.net/api/ratings/{cid}/"
-        response = requests.get(url)
-        print(f"API response: {response.status_code}")
-
-        if response.status_code != 200:
-            await ctx.send("Error: CID not found or API request failed.")
-            return
-
-        data = response.json()
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    await ctx.send("Error: CID not found or API request failed.")
+                    return
+                data = await resp.json()
+        print(f"API response: 200")
         print(f"API data: {data}")
 
         embed = discord.Embed(title=f"Information for CID: {cid}", color=discord.Color.orange())
@@ -143,7 +124,6 @@ class Vatsim(commands.Cog):
             return mapping.get(key, key.replace('_', ' ').title())
 
         def get_field_value(key, value):
-            # Add Discord relative timestamp for reg_date, susp_date, and lastratingchange
             if key in ("reg_date", "susp_date", "lastratingchange") and value:
                 try:
                     dt = parser.isoparse(value)
@@ -188,31 +168,31 @@ class Vatsim(commands.Cog):
         await ctx.send(embed=embed)
 
         # Now try VATUSA
-        vatusa_url = f"https://api.vatusa.net/user/{cid}?apikey={VATUSA_API_KEY}"
-        vatusa_response = requests.get(vatusa_url)
-
+        vatusa_url = f"https://api.vatusa.net/user/{cid}"
         try:
-            vatusa_data = vatusa_response.json()
-            if vatusa_data.get("data", {}).get("status") == "error":
-                return  # Don't show anything if not found
+            async with aiohttp.ClientSession() as session:
+                async with session.get(vatusa_url, params={"apikey": VATUSA_API_KEY}) as resp:
+                    if resp.status != 200:
+                        return
+                    vatusa_data = await resp.json()
+                    if vatusa_data.get("data", {}).get("status") == "error":
+                        return
         except Exception:
             return
 
-        # Reuse your usa command logic, or create a helper function for the embed
         await self.usa(ctx, cid)
 
     @commands.command()
     async def usa(self, ctx, cid: int):
         """Get VATUSA user info by CID"""
-        # 'cid' is already an int from the command signature
-        url = f"https://api.vatusa.net/user/{cid}?apikey={VATUSA_API_KEY}"
+        url = f"https://api.vatusa.net/user/{cid}"
 
-        response = requests.get(url)
-        if response.status_code != 200:
-            await ctx.send("Failed to retrieve data from VATUSA API.")
-            return
-
-        data = response.json().get("data", {})
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, params={"apikey": VATUSA_API_KEY}) as resp:
+                if resp.status != 200:
+                    await ctx.send("Failed to retrieve data from VATUSA API.")
+                    return
+                data = (await resp.json()).get("data", {})
 
         def format_date(date_str):
             if not date_str:
@@ -220,7 +200,7 @@ class Vatsim(commands.Cog):
             try:
                 dt = parser.parse(date_str)
                 return dt.strftime("%b %d, %Y")
-            except:
+            except Exception:
                 return date_str
 
         def format_bool(val):
@@ -230,12 +210,19 @@ class Vatsim(commands.Cog):
         name = f"{data.get('fname', '')} {data.get('lname', '')}".strip()
         embed = discord.Embed(title=f"{name} | CID: {cid}", color=discord.Color.teal())
 
+        # Resolve rating: prefer rating_short, fall back to numeric mapping
+        rating_num = data.get("rating")
+        rating_display = data.get("rating_short") or (
+            atc_rating.get(int(rating_num), str(rating_num)) if rating_num is not None else "N/A"
+        )
+
         fields = {
             "CID": cid,
             "Name": name,
             "Email": data.get("email", "N/A"),
             "Facility": data.get("facility", "N/A"),
-            "Rating": data.get("rating_short", "N/A"),
+            "Rating": rating_display,
+            "Home Controller": format_bool(data.get("flag_homecontroller")),
             "Created At": format_date(data.get("created_at")),
             "Updated At": format_date(data.get("updated_at")),
             "Flag Needbasic": format_bool(data.get("flag_needbasic")),
@@ -262,7 +249,10 @@ class Vatsim(commands.Cog):
 
         # Second Embed - Roles and Visiting Facilities
         roles = data.get("roles", [])
-        visits = data.get("visiting_facilities", [])
+        # Support both old "visiting_facilities" and new "visits" keys
+        visits = data.get("visiting_facilities") or data.get("visits") or []
+        promotions = data.get("promotions") or []
+        competencies = data.get("academy_competencies") or []
         roles_str = "N/A"
         visits_str = "N/A"
 
@@ -290,12 +280,33 @@ class Vatsim(commands.Cog):
         embed2.add_field(name="Roles", value=roles_str, inline=True)
         embed2.add_field(name="Visiting Facilities", value=visits_str, inline=True)
 
+        if promotions:
+            promo_lines = []
+            for promo in promotions:
+                from_raw = promo.get('from', 'N/A')
+                to_raw = promo.get('to', 'N/A')
+                from_str = atc_rating.get(from_raw, str(from_raw)) if isinstance(from_raw, int) else from_raw
+                to_str = atc_rating.get(to_raw, str(to_raw)) if isinstance(to_raw, int) else to_raw
+                promo_lines.append(
+                    f"From: {from_str} → To: {to_str}; "
+                    f"Date: {format_date(promo.get('created_at'))}"
+                )
+            embed2.add_field(name="Promotions", value="\n".join(promo_lines), inline=False)
+
+        if competencies:
+            comp_lines = []
+            for comp in competencies:
+                comp_lines.append(
+                    f"{comp.get('name', comp.get('competency', 'N/A'))}; "
+                    f"Date: {format_date(comp.get('created_at'))}"
+                )
+            embed2.add_field(name="Academy Competencies", value="\n".join(comp_lines), inline=False)
+
         await ctx.send(embed=embed2)
 
     @commands.command()
     async def lname(self, ctx, lastname: str, page: int = 1):
         """Search VATSIM users by last name"""
-        author_id = ctx.author.id
         users_per_page = 25
         url = f"https://api.vatusa.net/v2/user/filterlname/{lastname}"
 
@@ -317,37 +328,29 @@ class Vatsim(commands.Cog):
                     await ctx.send("No users found with that last name.")
                     return
 
-                if page:
-                    total_pages = (len(users) + users_per_page - 1) // users_per_page
-                    page = max(1, min(page, total_pages))
-                    start, end = (page - 1) * users_per_page, page * users_per_page
-                    paged_users = users[start:end]
+                total_pages = (len(users) + users_per_page - 1) // users_per_page
+                page = max(1, min(page, total_pages))
+                start, end = (page - 1) * users_per_page, page * users_per_page
+                paged_users = users[start:end]
 
-                    embed = discord.Embed(
-                        title=f"Users with last name: {lastname} (Page {page}/{total_pages})",
-                        color=discord.Color.green()
-                    )
-                    for user in paged_users:
-                        full_name = f"{user['fname']} {user['lname']}"
-                        embed.add_field(name=full_name, value=f"CID: {user['cid']}", inline=False)
-                    await ctx.send(embed=embed)
+                embed = discord.Embed(
+                    title=f"Users with last name: {lastname} (Page {page}/{total_pages})",
+                    color=discord.Color.green()
+                )
+                for user in paged_users:
+                    full_name = f"{user['fname']} {user['lname']}"
+                    embed.add_field(name=full_name, value=f"CID: {user['cid']}", inline=False)
+                await ctx.send(embed=embed)
 
-                else:
-                    chunks = [users[i:i + users_per_page] for i in range(0, len(users), users_per_page)]
-                    for i, chunk in enumerate(chunks):
-                        embed = discord.Embed(
-                            title=f"Users with last name: {lastname} (Page {i + 1}/{len(chunks)})",
-                            color=discord.Color.green()
-                        )
-                        for user in chunk:
-                            full_name = f"{user['fname']} {user['lname']}"
-                            embed.add_field(name=full_name, value=f"CID: {user['cid']}", inline=False)
-                        await ctx.send(embed=embed)
     @commands.command()
-    async def atis(self, ctx, icao: str):
-        """Get ATIS for an airport"""
-        response = requests.get(vatsim_url)
-        data = response.json()
+    async def vatis(self, ctx, icao: str):
+        """Get VATSIM ATIS for an airport"""
+        async with aiohttp.ClientSession() as session:
+            async with session.get(vatsim_url) as resp:
+                if resp.status != 200:
+                    await ctx.send("Failed to fetch VATSIM data.")
+                    return
+                data = await resp.json()
         airport_code = icao.upper()
 
         found_atis = [
@@ -393,9 +396,8 @@ class Vatsim(commands.Cog):
         for controller in data.get("controllers", []):
             if controller["callsign"].endswith("_SUP"):
                 cid = controller["cid"]
-                name = controller.get("name", f"CID {cid}")  # fallback name from datafeed
+                name = controller.get("name", f"CID {cid}")
 
-                # Try to get real name from VATUSA
                 try:
                     async with aiohttp.ClientSession() as session:
                         async with session.get(f"https://api.vatusa.net/v2/user/{cid}") as resp:
@@ -432,12 +434,10 @@ class Vatsim(commands.Cog):
                 pilots = feed.get("pilots", [])
                 atcs = feed.get("controllers", [])
 
-                # Try to find the user as ATC first
                 client_data = next((c for c in atcs if c.get("cid") == cid), None)
                 is_atc = True
 
                 if not client_data:
-                    # Try to find as pilot
                     client_data = next((p for p in pilots if p.get("cid") == cid), None)
                     is_atc = False
 
@@ -450,7 +450,6 @@ class Vatsim(commands.Cog):
                     await ctx.send(embed=embed)
                     return
 
-                # Build display name and rating
                 display_name = f"CID {cid}"
                 rating_id = client_data.get("rating") if is_atc else client_data.get("pilot_rating", -1)
 
@@ -477,35 +476,31 @@ class Vatsim(commands.Cog):
     async def stats(self, ctx, cid: int):
         """Get VATSIM statistics for a user"""
         url = f"https://api.vatsim.net/v2/members/{cid}/stats"
-        response = requests.get(url)
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    await ctx.send(f"Error retrieving stats for CID {cid}.")
+                    return
+                data = await resp.json()
 
-        if response.status_code != 200:
-            await ctx.send(f"Error retrieving stats for CID {cid}.")
-            return
-
-        data = response.json()
-
-        # Get real name from VATUSA API
-        real_name = "N/A"
-        try:
-            usa_resp = requests.get(f"https://api.vatusa.net/user/{cid}")
-            if usa_resp.status_code == 200:
-                usa_data = usa_resp.json().get("data", {})
-                real_name = f"{usa_data.get('fname', '')} {usa_data.get('lname', '')}".strip()
-        except Exception:
-            pass
+            real_name = "N/A"
+            try:
+                async with session.get(f"https://api.vatusa.net/user/{cid}") as resp2:
+                    if resp2.status == 200:
+                        usa_data = (await resp2.json()).get("data", {})
+                        real_name = f"{usa_data.get('fname', '')} {usa_data.get('lname', '')}".strip()
+            except Exception:
+                pass
 
         embed = discord.Embed(
             title=f"Statistics for CID: {cid}",
             color=discord.Color.green()
         )
 
-        # Header
         embed.add_field(name="CID", value=str(cid), inline=True)
         embed.add_field(name="Real Name", value=real_name, inline=True)
         embed.add_field(name="\u200b", value="\u200b", inline=True)
 
-        # ATC and PILOT
         embed.add_field(name="ATC Hours", value=str(data.get("atc", 0.0)), inline=True)
         embed.add_field(name="Pilot Hours", value=str(data.get("pilot", 0.0)), inline=True)
         embed.add_field(name="\u200b", value="\u200b", inline=True)
@@ -532,7 +527,6 @@ class Vatsim(commands.Cog):
                 await ctx.send("Failed to fetch VATSIM data.")
                 return
 
-            # Search in each group individually
             match = next(
                 (client for client in data.get("pilots", []) if client.get("callsign") == callsign),
                 None
@@ -590,8 +584,7 @@ class Vatsim(commands.Cog):
             return
 
         try:
-            data = fetch_transceivers_data()
-            frequencies = get_frequencies_for_callsign(callsign.upper(), data)
+            frequencies = await get_frequencies_for_callsign(callsign.upper())
 
             if frequencies:
                 freq_text = ", ".join(frequencies)
@@ -653,7 +646,6 @@ class Vatsim(commands.Cog):
                     fe_cid = facility.get('fe')
                     wm_cid = facility.get('wm')
 
-                    # Fetch names in parallel
                     atm_name, datm_name, ta_name, ec_name, fe_name, wm_name = await asyncio.gather(
                         fetch_user_name(atm_cid, session),
                         fetch_user_name(datm_cid, session),
@@ -678,11 +670,10 @@ class Vatsim(commands.Cog):
                     count += 1
                     completed += 1
 
-                    # Update loading message every 3 facilities
                     if completed % 3 == 0 or completed == total:
                         await status_msg.edit(content=f"Loading… {completed}/{total} facilities")
 
-                embeds.append(embed)  # append final batch
+                embeds.append(embed)
 
                 await status_msg.delete()
                 for emb in embeds:
@@ -725,13 +716,11 @@ class Vatsim(commands.Cog):
             embeds = [embed]
             field_count = len(embed.fields)
 
-            # Prepare role data
             total_roles = len(roles)
             cids = [r["cid"] for r in roles]
             role_names = [r.get("role", "Unknown") for r in roles]
             created_dates = [r.get("created_at", "")[:10] for r in roles]
 
-            # Resolve names in parallel
             names = await asyncio.gather(*[fetch_user_name(cid, session) for cid in cids])
 
             for i, (cid, role_name, created, name) in enumerate(zip(cids, role_names, created_dates, names), start=1):
@@ -746,7 +735,6 @@ class Vatsim(commands.Cog):
                 embed.add_field(name=role_display, value=value, inline=False)
                 field_count += 1
 
-                # Update progress
                 if i % 5 == 0 or i == total_roles:
                     await status_msg.edit(content=f"Resolving staff… {i}/{total_roles} complete")
 
@@ -859,7 +847,6 @@ class Vatsim(commands.Cog):
             color=color,
             timestamp=utcnow()
         )
-        #  embed.add_field(name="Flight Category", value=category, inline=False)
 
         await ctx.send(embed=embed)
 

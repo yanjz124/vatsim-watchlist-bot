@@ -26,3 +26,6 @@ venv/
 # OS / system files
 .DS_Store
 Thumbs.db
+
+# Smart pip install hash
+.requirements_hash

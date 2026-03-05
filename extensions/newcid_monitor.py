@@ -67,7 +67,7 @@ class NewCidMonitor(commands.Cog):
                                     reg_str = reg_dt.strftime("%Y-%m-%dT%H:%MZ")
                                     reg_timestamp = int(reg_dt.timestamp())
                                     reg_formatted = f"{reg_str}\n<t:{reg_timestamp}:R>"
-                                except:
+                                except Exception:
                                     reg_formatted = reg_date
                             else:
                                 reg_formatted = "N/A"
@@ -84,7 +84,7 @@ class NewCidMonitor(commands.Cog):
                                     change_str = change_dt.strftime("%Y-%m-%dT%H:%MZ")
                                     change_timestamp = int(change_dt.timestamp())
                                     change_formatted = f"{change_str}\n<t:{change_timestamp}:R>"
-                                except:
+                                except Exception:
                                     change_formatted = last_change
                             else:
                                 change_formatted = "N/A"

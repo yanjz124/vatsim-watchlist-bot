@@ -222,3 +222,18 @@ def save_a4_muted(muted):
     data = load_json('a4_monitor.json')
     data['muted'] = bool(muted)
     save_json('a4_monitor.json', data)
+
+
+# === Workload Monitor ===
+def load_workload_monitor():
+    data = load_json('workload_monitor.json')
+    return {
+        'enabled': data.get('enabled', False),
+        'threshold': data.get('threshold', 15),
+    }
+
+def save_workload_monitor(enabled, threshold):
+    save_json('workload_monitor.json', {
+        'enabled': enabled,
+        'threshold': threshold,
+    })

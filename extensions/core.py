@@ -5,8 +5,7 @@ import sys
 import asyncio
 import subprocess
 import re
-import threading
-import json
+import hashlib
 from typing import Optional
 import discord
 from discord.ext import commands, tasks
@@ -25,9 +24,69 @@ decay_control = {'active': True}
 
 
 class Core(commands.Cog):
+    REQ_HASH_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".requirements_hash")
+
     def __init__(self, bot):
         self.bot = bot
         self.save_data_periodically.start()
+
+    async def cog_unload(self):
+        self.save_data_periodically.cancel()
+
+    async def _install_requirements_if_needed(self, ctx, force=False):
+        """Install pip requirements only if requirements.txt has changed since last install."""
+        req_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "requirements.txt")
+        if not os.path.exists(req_path):
+            await ctx.send("No requirements.txt found; skipping pip install.")
+            return
+
+        # Hash current requirements.txt
+        with open(req_path, "rb") as f:
+            current_hash = hashlib.md5(f.read()).hexdigest()
+
+        # Compare to last installed hash
+        if not force and os.path.exists(self.REQ_HASH_FILE):
+            with open(self.REQ_HASH_FILE, "r") as f:
+                stored_hash = f.read().strip()
+            if stored_hash == current_hash:
+                await ctx.send("Requirements unchanged — skipping pip install.")
+                return
+
+        await ctx.send("Installing new/changed requirements...")
+        pip_res = await asyncio.to_thread(
+            subprocess.run,
+            [sys.executable, "-m", "pip", "install", "-r", req_path],
+            capture_output=True, text=True
+        )
+        pip_out = (pip_res.stdout or "") + ("\n" + pip_res.stderr if pip_res.stderr else "")
+
+        if pip_res.returncode != 0:
+            await ctx.send(f"Pip install FAILED:\n```{pip_out[:1800]}```")
+            return
+
+        # Save hash on success
+        with open(self.REQ_HASH_FILE, "w") as f:
+            f.write(current_hash)
+
+        # Report only if new packages were actually installed
+        installed = []
+        m = re.search(r"Successfully installed (.+)", pip_out)
+        if m:
+            installed = m.group(1).strip().split()
+        else:
+            m2 = re.search(r"Installing collected packages: (.+)", pip_out)
+            if m2:
+                installed = [p.strip().strip(',') for p in m2.group(1).split(',') if p.strip()]
+
+        if installed:
+            cleaned = []
+            for tok in installed:
+                tok = tok.strip().strip(',')
+                mname = re.match(r"^([A-Za-z0-9_.+-]+)", tok)
+                cleaned.append(mname.group(1) if mname else tok)
+            await ctx.send(f"Pip installed: {', '.join(cleaned)}")
+        else:
+            await ctx.send("All requirements already satisfied.")
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -119,39 +178,7 @@ class Core(commands.Cog):
         git_out = (git_res.stdout or "") + ("\n" + git_res.stderr if git_res.stderr else "")
         await ctx.send(f"Git pull result:\n```{git_out[:1900]}```")
 
-        # Attempt to install requirements (if any)
-        req_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "requirements.txt")
-        if os.path.exists(req_path):
-            await ctx.send("Installing requirements from requirements.txt...")
-            pip_res = await asyncio.to_thread(subprocess.run, [sys.executable, "-m", "pip", "install", "-r", req_path], capture_output=True, text=True)
-            pip_out = (pip_res.stdout or "") + ("\n" + pip_res.stderr if pip_res.stderr else "")
-
-            # Only report pip output if install failed or packages were actually installed.
-            if pip_res.returncode != 0:
-                await ctx.send(f"Pip install FAILED:\n```{pip_out[:1800]}```")
-            else:
-                # Try to detect installed packages from pip output.
-                installed = []
-                m = re.search(r"Successfully installed (.+)", pip_out)
-                if m:
-                    tokens = m.group(1).strip().split()
-                    installed.extend(tokens)
-                else:
-                    m2 = re.search(r"Installing collected packages: (.+)", pip_out)
-                    if m2:
-                        tokens = [p.strip().strip(',') for p in m2.group(1).split(',') if p.strip()]
-                        installed.extend(tokens)
-
-                if installed:
-                    # Clean tokens to show package names (strip versions if present)
-                    cleaned = []
-                    for tok in installed:
-                        tok = tok.strip().strip(',')
-                        mname = re.match(r"^([A-Za-z0-9_.+-]+)", tok)
-                        cleaned.append(mname.group(1) if mname else tok)
-                    await ctx.send(f"Pip installed: {', '.join(cleaned)}")
-        else:
-            await ctx.send("No requirements.txt found; skipping pip install.")
+        await self._install_requirements_if_needed(ctx)
 
     @commands.command()
     async def restartlinux(self, ctx):
@@ -195,38 +222,7 @@ class Core(commands.Cog):
                 await ctx.send(f"Changes summary:\n```{stat_output}```")
 
         self.save_data()
-
-        # Install requirements
-        req_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "requirements.txt",
-        )
-
-        if os.path.exists(req_path):
-            await ctx.send("Installing requirements before restart...")
-            pip_res = await asyncio.to_thread(
-                subprocess.run,
-                [sys.executable, "-m", "pip", "install", "-r", req_path],
-                capture_output=True,
-                text=True,
-            )
-
-            pip_out = (pip_res.stdout or "") + ("\n" + pip_res.stderr if pip_res.stderr else "")
-
-            if pip_res.returncode != 0:
-                await ctx.send(f"Pip install FAILED:\n```{pip_out[:1800]}```")
-            else:
-                installed = []
-                m = re.search(r"Successfully installed (.+)", pip_out)
-                if m:
-                    installed.extend(m.group(1).strip().split())
-                else:
-                    m2 = re.search(r"Installing collected packages: (.+)", pip_out)
-                    if m2:
-                        installed.extend([p.strip().strip(',') for p in m2.group(1).split(',')])
-
-                if installed:
-                    await ctx.send(f"Pip installed: {', '.join(installed)}")
+        await self._install_requirements_if_needed(ctx)
 
         # Trigger systemd restart
         await ctx.send("Restarting bot via systemd...")
@@ -295,35 +291,7 @@ class Core(commands.Cog):
                 await ctx.send(f"Changes summary:\n```{stat_output}```")
 
         self.save_data()
-        # Install requirements before restart
-        req_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "requirements.txt")
-        if os.path.exists(req_path):
-            await ctx.send("Installing requirements from requirements.txt before restart...")
-            pip_res = await asyncio.to_thread(subprocess.run, [sys.executable, "-m", "pip", "install", "-r", req_path], capture_output=True, text=True)
-            pip_out = (pip_res.stdout or "") + ("\n" + pip_res.stderr if pip_res.stderr else "")
-
-            # Only report pip output if install failed or packages were actually installed.
-            if pip_res.returncode != 0:
-                await ctx.send(f"Pip install FAILED:\n```{pip_out[:1800]}```")
-            else:
-                installed = []
-                m = re.search(r"Successfully installed (.+)", pip_out)
-                if m:
-                    tokens = m.group(1).strip().split()
-                    installed.extend(tokens)
-                else:
-                    m2 = re.search(r"Installing collected packages: (.+)", pip_out)
-                    if m2:
-                        tokens = [p.strip().strip(',') for p in m2.group(1).split(',') if p.strip()]
-                        installed.extend(tokens)
-
-                if installed:
-                    cleaned = []
-                    for tok in installed:
-                        tok = tok.strip().strip(',')
-                        mname = re.match(r"^([A-Za-z0-9_.+-]+)", tok)
-                        cleaned.append(mname.group(1) if mname else tok)
-                    await ctx.send(f"Pip installed: {', '.join(cleaned)}")
+        await self._install_requirements_if_needed(ctx)
 
         await ctx.send("Updating and restarting...")
         await self.bot.close()

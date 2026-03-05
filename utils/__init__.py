@@ -23,7 +23,9 @@ from .data_manager import (
     save_a9_monitor,
 )
 
-from .vatsim_datafeed import fetch_vatsim_data, fetch_user_name, fetch_transceivers_data, get_frequencies_for_callsign
+from .vatsim_datafeed import fetch_vatsim_data, fetch_user_name
+
+from .transceivers_cache import start_transceivers_cache, get_frequencies_for_callsign
 
 from .datafeed_embed import build_status_embed
 

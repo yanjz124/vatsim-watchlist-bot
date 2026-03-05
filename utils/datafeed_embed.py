@@ -1,7 +1,7 @@
 import discord
 from dateutil import parser
 from datetime import timezone
-from utils import fetch_user_name, fetch_vatsim_data
+from utils import fetch_user_name, fetch_vatsim_data, get_frequencies_for_callsign
 from utils.geo import reverse_geocode
 from utils.mapbox_static import generate_map_image
 from config import facility
@@ -28,7 +28,28 @@ async def build_status_embed(client_data, display_name, rating, is_atc=False, fi
     embed.add_field(name="Name", value=client_data.get("name", "N/A"), inline=True)
 
     if is_atc:
-        embed.add_field(name="Frequency", value=client_data.get("frequency", "N/A"), inline=True)
+        # Fetch AFV frequencies for controllers
+        afv_frequencies = None
+        try:
+            afv_frequencies = await get_frequencies_for_callsign(callsign)
+            if afv_frequencies:
+                # Deduplicate frequencies
+                unique_freqs = list(dict.fromkeys(afv_frequencies))
+
+                # Show first frequency as main, rest in parentheses
+                if len(unique_freqs) == 1:
+                    freq_display = unique_freqs[0]
+                else:
+                    freq_display = f"{unique_freqs[0]} ({', '.join(unique_freqs[1:])})"
+
+                embed.add_field(name="Frequency", value=freq_display, inline=True)
+            else:
+                # Fallback to VATSIM data frequency
+                embed.add_field(name="Frequency", value=client_data.get("frequency", "N/A"), inline=True)
+        except Exception as e:
+            print(f"[build_status_embed] Failed to get AFV frequencies for controller: {e}")
+            # Fallback to VATSIM data frequency
+            embed.add_field(name="Frequency", value=client_data.get("frequency", "N/A"), inline=True)
         facility_id = client_data.get("facility", "N/A")
         facility_str = facility.get(facility_id, f"Unknown ({facility_id})")
         embed.add_field(name="Facility", value=facility_str, inline=True)
@@ -105,7 +126,7 @@ async def build_status_embed(client_data, display_name, rating, is_atc=False, fi
             enroute_time = fp.get("enroute_time", "N/A")
             fuel_time = fp.get("fuel_time", "N/A")
             route = fp.get("route", "N/A") or "N/A"
-            
+
             embed.add_field(name="Aircraft", value=aircraft, inline=True)
             embed.add_field(name="Flight Type", value=flight_rules, inline=True)
             embed.add_field(name="Altitude", value=alt, inline=True)
@@ -130,7 +151,19 @@ async def build_status_embed(client_data, display_name, rating, is_atc=False, fi
     # Initialize file variable
     file = None
 
-    # 🗺 Add map if lat/lon exists
+    # Add transceiver frequencies for pilots only (controllers handled above)
+    if not is_atc:
+        try:
+            afv_frequencies = await get_frequencies_for_callsign(callsign)
+            if afv_frequencies:
+                # Deduplicate frequencies
+                unique_freqs = list(dict.fromkeys(afv_frequencies))
+                freq_display = ", ".join(unique_freqs)
+                embed.add_field(name="Frequencies", value=freq_display, inline=False)
+        except Exception as e:
+            print(f"[build_status_embed] Failed to get pilot frequencies: {e}")
+
+    # Add map if lat/lon exists
     try:
         vatsim_data = await fetch_vatsim_data()
         if isinstance(vatsim_data, dict):
@@ -145,7 +178,7 @@ async def build_status_embed(client_data, display_name, rating, is_atc=False, fi
             current_alt = live_entry.get("altitude", "N/A")
             groundspeed = live_entry.get("groundspeed", "N/A")
             heading = live_entry.get("heading", "N/A")
-            
+
             # QNH values
             qnh_inhg = live_entry.get("qnh_i_hg", "N/A")
             qnh_mb = live_entry.get("qnh_mb", "N/A")
@@ -157,7 +190,7 @@ async def build_status_embed(client_data, display_name, rating, is_atc=False, fi
                 qnh_display = f"QNH: {qnh_mb} hPa"
             else:
                 qnh_display = ""
-            
+
             if lat is not None and lon is not None:
                 location = await reverse_geocode(lat, lon)
                 position_info = (
