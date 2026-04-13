@@ -224,6 +224,48 @@ def save_a4_muted(muted):
     save_json('a4_monitor.json', data)
 
 
+# === ATIS Monitor ===
+def load_atis_monitor():
+    """Load the ATIS monitor data. Returns dict of {airport: {last_codes: {}, last_updated: {}}}"""
+    return load_json('atis_monitor.json')
+
+def save_atis_monitor(atis_data):
+    """Save the ATIS monitor data"""
+    save_json('atis_monitor.json', atis_data)
+
+def add_atis_monitor(airport):
+    """Add an airport to ATIS monitoring"""
+    atis_data = load_atis_monitor()
+    airport = airport.upper()
+    if airport not in atis_data:
+        atis_data[airport] = {
+            'last_codes': {},  # {type: code}
+            'last_updated': {}  # {type: timestamp}
+        }
+        save_atis_monitor(atis_data)
+        return True
+    return False
+
+def remove_atis_monitor(airport):
+    """Remove an airport from ATIS monitoring"""
+    atis_data = load_atis_monitor()
+    airport = airport.upper()
+    if airport in atis_data:
+        atis_data.pop(airport)
+        save_atis_monitor(atis_data)
+        return True
+    return False
+
+def update_atis_state(airport, atis_type, code, updated_at):
+    """Update the last known ATIS state for an airport"""
+    atis_data = load_atis_monitor()
+    airport = airport.upper()
+    if airport in atis_data:
+        atis_data[airport]['last_codes'][atis_type] = code
+        atis_data[airport]['last_updated'][atis_type] = updated_at
+        save_atis_monitor(atis_data)
+
+
 # === Workload Monitor ===
 def load_workload_monitor():
     data = load_json('workload_monitor.json')
