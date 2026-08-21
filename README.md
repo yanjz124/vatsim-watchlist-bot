@@ -107,6 +107,7 @@ errors or retries when a key is absent.
 | `DISCORD_TOKEN` | **required** | won't start |
 | `MAPBOX_TOKEN` | position map images on monitor embeds | embeds render with full position telemetry, no map picture |
 | `OPENCAGE_KEY` | a place name under the coordinates | the line is omitted |
+| `OPENCAGE_DAILY_CAP` | ceiling on geocode requests per UTC day (default 2000) | — |
 | `VATUSA_TOKEN` | authenticated VATUSA fields (rosters, staff) | public VATUSA data only |
 | `ADMIN_ID` | owner-only commands (`!update`, `!restart`, …) | those commands are open |
 
@@ -117,6 +118,15 @@ billed per request against *your* account, and the request rate scales with
 (controllers never move, so they cost one lookup no matter how long they sit),
 but map images are not cacheable. If you're running a shared instance, either
 leave `MAPBOX_TOKEN` unset or put a billing alert on it.
+
+Geocoding has a hard daily ceiling (`OPENCAGE_DAILY_CAP`, default 2000, just
+under OpenCage's 2,500/day free tier). Once it trips, embeds drop the location
+line until UTC midnight rather than spending past the free tier. Caching does
+most of the work below that: a controller costs one lookup no matter how long
+they stay online, and cruising aircraft are reported region-only against a
+coarse cell, which lands around 58% cache hits. Aircraft below 18,000 ft get
+city-level detail and effectively no caching — that's where the resolution is
+worth paying for.
 
 ## Permissions & Intents
 

@@ -244,7 +244,11 @@ async def _attach_position_and_map(embed, client_data, is_atc):
     # Geocoding is optional: with no OPENCAGE_KEY configured every lookup
     # returns UNKNOWN, and printing that on every embed reads as broken
     # rather than deliberate. Omit the line instead.
-    location = await reverse_geocode(lat, lon)
+    # Altitude only widens the cache cell -- a cruising aircraft doesn't
+    # need street-level resolution, and a coarse cell is the only way it
+    # ever hits the cache at all.
+    location = await reverse_geocode(
+        lat, lon, altitude_ft=None if current_alt == 'N/A' else current_alt)
     coords = f'{lat:.5f}, {lon:.5f}'
     telemetry = (
         f'Alt: {current_alt} ft | GS: {groundspeed} kts | HDG: {heading}°'
