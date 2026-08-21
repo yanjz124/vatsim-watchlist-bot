@@ -106,6 +106,74 @@ def remove_callsign_monitor(pattern):
     save_callsign_monitor(callsign_to_monitor)
 
 
+# === Callsign Mute ===
+import time as _time
+import fnmatch as _fnmatch
+
+
+def _prune_expired_callsign_mutes(mutes):
+    now = int(_time.time())
+    changed = False
+    for pat in list(mutes.keys()):
+        exp = mutes[pat]
+        if exp is not None and exp <= now:
+            mutes.pop(pat, None)
+            changed = True
+    return changed
+
+
+def load_callsign_mutes():
+    """Returns dict of {pattern_upper: expires_at_epoch_or_None}.
+    Prunes expired entries on read and persists if any pruned."""
+    raw = load_json('callsign_mute.json') or {}
+    mutes = {}
+    for k, v in raw.items():
+        mutes[k.upper()] = v if (isinstance(v, int) or v is None) else None
+    if _prune_expired_callsign_mutes(mutes):
+        save_json('callsign_mute.json', mutes)
+    return mutes
+
+
+def save_callsign_mutes(mutes):
+    save_json('callsign_mute.json', mutes)
+
+
+def add_callsign_mute(pattern, hours=24):
+    """Add or update a mute. hours<=0 means permanent. Returns (pattern_upper, expires_at)."""
+    pattern = pattern.upper()
+    mutes = load_callsign_mutes()
+    if hours is None or hours <= 0:
+        expires_at = None
+    else:
+        expires_at = int(_time.time()) + int(hours * 3600)
+    mutes[pattern] = expires_at
+    save_callsign_mutes(mutes)
+    return pattern, expires_at
+
+
+def remove_callsign_mute(pattern):
+    pattern = pattern.upper()
+    mutes = load_callsign_mutes()
+    existed = pattern in mutes
+    if existed:
+        mutes.pop(pattern, None)
+        save_callsign_mutes(mutes)
+    return existed
+
+
+def is_callsign_muted(callsign):
+    """True if callsign matches any active (non-expired) mute pattern. Supports * wildcards."""
+    if not callsign:
+        return False
+    callsign = callsign.upper()
+    mutes = load_callsign_mutes()
+    for pat in mutes:
+        if _fnmatch.fnmatchcase(callsign, pat):
+            return True
+    return False
+
+
+
 # === Banned Words ===
 def load_banned_words():
     return load_json('banned_words.json')
@@ -179,27 +247,6 @@ def load_a9_monitor():
 
 def save_a9_monitor(keywords):
     save_json('a9_monitor.json', keywords)
-
-
-# === P56 Monitor ===
-def load_p56_muted():
-    data = load_json('p56_monitor.json')
-    return data.get('muted', False)
-
-def save_p56_muted(muted):
-    data = load_json('p56_monitor.json')
-    data['muted'] = muted
-    save_json('p56_monitor.json', data)
-
-def load_p56_seen_events():
-    """Load set of already-alerted event identifiers to prevent duplicates"""
-    data = load_json('p56_monitor.json')
-    return set(data.get('seen_events', []))
-
-def save_p56_seen_events(seen_events):
-    data = load_json('p56_monitor.json')
-    data['seen_events'] = list(seen_events)
-    save_json('p56_monitor.json', data)
 
 
 # === FAA Adv Monitor mute state ===
@@ -279,3 +326,55 @@ def save_workload_monitor(enabled, threshold):
         'enabled': enabled,
         'threshold': threshold,
     })
+
+
+# === Workload Trigger Stats ===
+def load_workload_stats():
+    """Returns dict keyed by 'CALLSIGN|CID' -> stats record."""
+    raw = load_json('workload_stats.json') or {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def save_workload_stats(stats):
+    save_json('workload_stats.json', stats)
+
+
+def record_workload_trigger(callsign, cid, name, rating, pilot_count):
+    """Increment trigger count for a (callsign, cid) pair. Updates peak and
+    last-seen metadata. Safe to call with missing fields."""
+    if not callsign:
+        return
+    callsign = str(callsign).upper()
+    cid_str = str(cid) if cid is not None else "N/A"
+    key = f"{callsign}|{cid_str}"
+    now = int(_time.time())
+
+    stats = load_workload_stats()
+    rec = stats.get(key) or {
+        "callsign": callsign,
+        "cid": cid_str,
+        "triggers": 0,
+        "first_trigger": now,
+        "peak_count": 0,
+    }
+    rec["callsign"] = callsign
+    rec["cid"] = cid_str
+    if name:
+        rec["name"] = name
+    if rating:
+        rec["rating"] = rating
+    rec["triggers"] = int(rec.get("triggers", 0)) + 1
+    rec["last_trigger"] = now
+    try:
+        pc = int(pilot_count)
+        rec["last_count"] = pc
+        if pc > int(rec.get("peak_count", 0)):
+            rec["peak_count"] = pc
+    except (TypeError, ValueError):
+        pass
+    stats[key] = rec
+    save_workload_stats(stats)
+
+
+def clear_workload_stats():
+    save_workload_stats({})

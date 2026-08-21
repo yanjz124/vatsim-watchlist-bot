@@ -4,6 +4,7 @@ import discord
 from discord.ext import commands
 from config import atc_rating, pilot_rating, CHANNEL_ID
 from utils import fetch_vatsim_data, build_status_embed
+import io
 import time
 
 
@@ -190,20 +191,74 @@ class VatsimMonitorLoop(commands.Cog):
                     print(f"Error refreshing map for {key}: {e}")
 
     async def handle_disconnection(self, key):
-        """Update embed footer to disconnected and send offline notification."""
+        """Edit the embed to grey + 'Disconnected' footer, preserving the map.
+
+        Two gotchas we hit:
+          1. Discord's attachment URLs (cdn.discordapp.com / media.discordapp.net)
+             are now signed with an expiring `?ex=` / `?hm=` token. Our
+             cached Message object holds the URL from minutes/hours ago,
+             so attachment.read() against it can 403/404 silently.
+             Re-fetching the message gives us fresh URLs.
+          2. discord.py's `attachment://filename` resolution only fires
+             when a real File is being uploaded in the same request —
+             passing existing Attachment objects in attachments= doesn't
+             trigger it. So we have to download the existing image bytes
+             and re-upload as a fresh File with the same filename.
+
+        Also rebuilds the embed from scratch instead of round-tripping
+        through to_dict/from_dict, which carries over the stale image
+        URL state we don't want."""
         last_msg = self.message_cache.get(key)
-        if last_msg:
+        if last_msg is None:
+            return
+
+        try:
+            # Refresh URLs (the cached message's attachment URLs may have
+            # expired their signed params).
             try:
-                if last_msg.embeds:
-                    old_embed = last_msg.embeds[0]
-                    embed_dict = old_embed.to_dict()
-                    if 'image' in embed_dict:
-                        del embed_dict['image']
-                    new_embed = discord.Embed.from_dict(embed_dict)
-                    new_embed.set_footer(text="Status: Disconnected")
-                    await last_msg.edit(embed=new_embed, attachments=[])
+                last_msg = await last_msg.channel.fetch_message(last_msg.id)
             except Exception as e:
-                print(f"Error updating embed footer for disconnected {key}: {e}")
+                print(f"[base_monitor] couldn't re-fetch message for {key}: {e}")
+
+            if not last_msg.embeds:
+                return
+
+            old = last_msg.embeds[0]
+            new = discord.Embed(
+                title=old.title,
+                description=old.description,
+                url=old.url,
+                color=discord.Color.from_rgb(0x60, 0x7D, 0x8B),
+                timestamp=old.timestamp,
+            )
+            for field in old.fields:
+                new.add_field(name=field.name, value=field.value, inline=field.inline)
+            if old.author and old.author.name:
+                new.set_author(
+                    name=old.author.name,
+                    url=old.author.url,
+                    icon_url=old.author.icon_url,
+                )
+            if old.thumbnail and old.thumbnail.url:
+                new.set_thumbnail(url=old.thumbnail.url)
+            new.set_footer(text="Status: Disconnected")
+
+            file = None
+            if last_msg.attachments:
+                attachment = last_msg.attachments[0]
+                try:
+                    data = await attachment.read()
+                    file = discord.File(io.BytesIO(data), filename=attachment.filename)
+                    new.set_image(url=f"attachment://{attachment.filename}")
+                except Exception as e:
+                    print(f"[base_monitor] Couldn't re-read attachment for {key}: {e}")
+
+            if file is not None:
+                await last_msg.edit(embed=new, attachments=[file])
+            else:
+                await last_msg.edit(embed=new, attachments=[])
+        except Exception as e:
+            print(f"Error updating embed footer for disconnected {key}: {e}")
 
         title, description = self.get_offline_description(key)
         embed = discord.Embed(title=title, description=description, color=discord.Color.red())

@@ -59,10 +59,6 @@ This document lists the bot's built-in commands, grouped by extension. Use the `
   - Manage A1 keyword monitoring.
 - `!a4mon [mute|unmute|status]`
   - Toggle A4 violation alerts.
-- `!p56mon [mute|unmute|status]`
-  - Toggle P56 intrusion alerts.
-- `!p56 [limit]`
-  - Show recent P56 intrusion events (limit defaults to 10).
 - `!a9mon [add|remove|list] [keyword]`
   - Manage A9 keyword monitoring.
 

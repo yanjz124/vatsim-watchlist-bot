@@ -9,6 +9,10 @@ from .data_manager import (
     save_callsign_monitor,
     add_callsign_monitor,
     remove_callsign_monitor,
+    load_callsign_mutes,
+    add_callsign_mute,
+    remove_callsign_mute,
+    is_callsign_muted,
     load_type_monitor,
     save_type_monitor,
     add_type_monitor,
@@ -29,6 +33,7 @@ from .data_manager import (
 )
 
 from .vatsim_datafeed import fetch_vatsim_data, fetch_user_name
+from .vatsim_api import vatsim_apis
 
 from .transceivers_cache import start_transceivers_cache, get_frequencies_for_callsign
 
@@ -41,3 +46,8 @@ from .mapbox_static import generate_map_image
 from .geo import reverse_geocode
 
 from .fingerprint import generate_fingerprint
+
+from .track_history import (
+    record_position, get_track, clear_track,
+    track_bbox_zoom, smart_zoom_for_track,
+)

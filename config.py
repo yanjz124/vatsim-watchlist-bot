@@ -31,5 +31,3 @@ facility = {
     0: "OBS", 1: "FSS", 2: "DEL", 3: "GND", 4: "TWR", 5: "APP", 6: "CTR"
 }
 
-# P56 Monitor API endpoint (local service on Pi)
-P56_API_URL = os.getenv("P56_API_URL", "http://127.0.0.1:8000/api/v1/p56/")

@@ -4,7 +4,7 @@ import re
 from discord.ext import tasks
 from collections import defaultdict
 from extensions.base_monitor import VatsimMonitorLoop
-from utils import load_callsign_monitor
+from utils import load_callsign_monitor, is_callsign_muted
 
 
 class CallsignMonitor(VatsimMonitorLoop):
@@ -28,6 +28,8 @@ class CallsignMonitor(VatsimMonitorLoop):
         current_matches = defaultdict(list)
         for client in pilots + controllers:
             callsign = client.get("callsign", "").upper()
+            if is_callsign_muted(callsign):
+                continue
             for mon in callsigns:
                 pattern = mon.replace("*", ".*").upper()
                 if re.fullmatch(pattern, callsign):

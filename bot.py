@@ -31,7 +31,6 @@ extensions = [
     "extensions.newcid_monitor_loop",
     "extensions.type_monitor",
     "extensions.type_monitor_loop",
-    "extensions.p56_monitor_loop",
     "extensions.workload",
     "extensions.atis",
     "extensions.atis_monitor_loop"

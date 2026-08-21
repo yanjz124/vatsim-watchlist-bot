@@ -5,7 +5,6 @@ This repository contains a Discord bot that monitors VATSIM data and provides us
 ## Features
 - VATSIM data monitoring and notifications
 - CID/callsign/type monitors with persistent JSON-backed state
-- P56 monitor support (local API integration)
 - Moderation / CoC tools (optional)
 
 ## Requirements
@@ -183,8 +182,6 @@ Below is a summary of the bot's built-in commands, grouped by extension. Use the
 	- `!fakename [add|remove|list] [pattern]`: Manage fake-name detection patterns.
 	- `!a1mon [add|remove|list] [keyword]`: Manage A1 keyword monitoring.
 	- `!a4mon [mute|unmute|status]`: Toggle A4 violation alerts.
-	- `!p56mon [mute|unmute|status]`: Toggle P56 intrusion alerts.
-	- `!p56 [limit]`: Show recent P56 intrusion events (limit defaults to 10).
 	- `!a9mon [add|remove|list] [keyword]`: Manage A9 keyword monitoring.
 
 - **FAA / Advisories (`extensions/faa_adv_monitor.py`, `extensions/faa_restrictions.py`)**

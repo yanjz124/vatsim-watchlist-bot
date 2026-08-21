@@ -46,7 +46,16 @@ async def get_transceivers_data() -> list:
 
 
 async def get_frequencies_for_callsign(callsign: str) -> Optional[List[str]]:
-    """Get formatted frequencies for a given callsign from the cache."""
+    """
+    Get formatted frequencies for a given callsign.
+
+    Args:
+        callsign: The callsign to look up
+
+    Returns:
+        List of frequency strings in MHz format (e.g., ["122.800", "121.500"])
+        or None if callsign not found
+    """
     data = await get_transceivers_data()
 
     for entry in data:
@@ -55,9 +64,11 @@ async def get_frequencies_for_callsign(callsign: str) -> Optional[List[str]]:
             if not transceivers:
                 return None
 
+            # Convert Hz to MHz and format
             frequencies = []
             for t in transceivers:
                 freq_hz = t.get('frequency', 0)
+                # Convert to MHz and round to 3 decimal places (effectively removes the Hz portion)
                 freq_mhz = freq_hz / 1_000_000
                 frequencies.append(f"{freq_mhz:.3f}")
 

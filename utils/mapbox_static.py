@@ -47,13 +47,99 @@ def compute_zoom_between_two_points(start, end, width=600, height=400, padding=2
     return int(max(min(zoom, max_zoom), min_zoom))
 
 
-async def generate_map_image(center_lat, center_lon, pins=None, path_coords=None, zoom=None, width=600, height=400):
+# FR24-style altitude color stops. Smooth gradient is interpolated
+# between these in RGB space, then quantized so adjacent segments with
+# nearly identical altitudes share a Mapbox layer.
+_GRADIENT_STOPS = [
+    (100,   (255, 255, 255)),   # ground / unknown -> white
+    (5000,  (255, 255,   0)),   # yellow
+    (15000, (  0, 255,   0)),   # green
+    (25000, (  0, 200, 255)),   # cyan
+    (35000, (  0,  80, 255)),   # blue
+    (45000, (180,   0, 255)),   # purple
+    (55000, (255,   0, 100)),   # red
+]
+_COLOR_QUANTIZE_STEP = 16   # 16 steps per channel = 16 distinct shades along the ramp
+
+
+def altitude_gradient_color(alt_ft):
+    """Interpolate a smooth color from _GRADIENT_STOPS for the given
+    altitude in feet, then quantize each channel so adjacent segments
+    with similar altitudes share a color (and merge into one Mapbox
+    layer)."""
+    if alt_ft is None or alt_ft <= _GRADIENT_STOPS[0][0]:
+        r, g, b = _GRADIENT_STOPS[0][1]
+    elif alt_ft >= _GRADIENT_STOPS[-1][0]:
+        r, g, b = _GRADIENT_STOPS[-1][1]
+    else:
+        for (a1, c1), (a2, c2) in zip(_GRADIENT_STOPS, _GRADIENT_STOPS[1:]):
+            if a1 <= alt_ft <= a2:
+                t = (alt_ft - a1) / (a2 - a1) if a2 != a1 else 0.0
+                r = int(round(c1[0] + t * (c2[0] - c1[0])))
+                g = int(round(c1[1] + t * (c2[1] - c1[1])))
+                b = int(round(c1[2] + t * (c2[2] - c1[2])))
+                break
+
+    step = _COLOR_QUANTIZE_STEP
+    r = min(255, (r // step) * step)
+    g = min(255, (g // step) * step)
+    b = min(255, (b // step) * step)
+    return f"{r:02x}{g:02x}{b:02x}"
+
+
+def _altitude_colored_path_layers(path_coords, path_altitudes):
+    """Emit Mapbox `path-` layers split by interpolated altitude color.
+    Consecutive segments with the same quantized color get merged into
+    one polyline so the URL stays short even on a 60-point trail."""
+    layers = []
+    if not path_coords or len(path_coords) < 2:
+        return layers
+
+    segments = []   # list of [color, [point, point, ...]]
+    for i in range(len(path_coords) - 1):
+        a1 = path_altitudes[i] if i < len(path_altitudes) else None
+        a2 = path_altitudes[i + 1] if i + 1 < len(path_altitudes) else None
+        if a1 is None and a2 is None:
+            avg = None
+        elif a1 is None:
+            avg = a2
+        elif a2 is None:
+            avg = a1
+        else:
+            avg = (a1 + a2) / 2.0
+        color = altitude_gradient_color(avg)
+        if segments and segments[-1][0] == color:
+            segments[-1][1].append(path_coords[i + 1])
+        else:
+            segments.append([color, [path_coords[i], path_coords[i + 1]]])
+
+    for color, pts in segments:
+        encoded = polyline.encode(pts, precision=5)
+        layers.append(f"path-3+{color}-0.9({encoded})")
+    return layers
+
+
+async def generate_map_image(center_lat, center_lon, pins=None,
+                             path_coords=None, path_altitudes=None,
+                             zoom=None, width=600, height=400):
     layers = []
 
-    # Add path if available
+    # Add path if available. Mapbox Static Images allows at most 100 overlay
+    # features and an 8192-char URL. A noisy/long altitude profile can explode
+    # into many tiny per-color `path-` segments (one overlay each) and blow past
+    # the feature limit, so the whole request fails and no map renders. Prefer
+    # the altitude-colored path only while it stays within a safe budget;
+    # otherwise fall back to a single simple polyline so the map still renders.
     if path_coords and len(path_coords) >= 2:
-        encoded = polyline.encode(path_coords, precision=5)
-        layers.append(f"path-3+0000ff-0.9({encoded})")
+        alt_layers = []
+        if path_altitudes and len(path_altitudes) == len(path_coords):
+            alt_layers = _altitude_colored_path_layers(path_coords, path_altitudes)
+        _MAX_PATH_SEGMENTS = 40
+        if alt_layers and len(alt_layers) <= _MAX_PATH_SEGMENTS:
+            layers.extend(alt_layers)
+        else:
+            encoded = polyline.encode(path_coords, precision=5)
+            layers.append(f"path-3+0000ff-0.9({encoded})")
 
     # Add pins
     if pins:
@@ -90,3 +176,133 @@ async def generate_map_image(center_lat, center_lon, pins=None, path_coords=None
                 return error_msg + "\n" + error_url
             data = await resp.read()
             return BytesIO(data)
+
+
+def _lat_to_mercator_y(lat):
+    """Clamp latitude to the web Mercator valid range and return Y (radians)."""
+    lat = max(-85.05112878, min(85.05112878, lat))
+    return math.log(math.tan(math.pi / 4 + math.radians(lat) / 2))
+
+
+def _mercator_y_to_lat(y):
+    """Inverse of _lat_to_mercator_y."""
+    return math.degrees(2 * math.atan(math.exp(y)) - math.pi / 2)
+
+
+def _enclosing_lon_arc(lons):
+    """Return (center_lon, span_deg) for the smallest arc on a circle that
+    encloses every input longitude. Handles antimeridian wrap so e.g.
+    [+170, -170] resolves to a 20° arc centered on 180 rather than a 340°
+    span centered on 0. Span is 0 when all inputs coincide."""
+    if not lons:
+        return 0.0, 0.0
+    if len(set(lons)) == 1:
+        return lons[0], 0.0
+
+    sorted_lons = sorted(lons)
+    direct_span = sorted_lons[-1] - sorted_lons[0]
+    wrap_gap = 360.0 - direct_span
+
+    max_gap = 0.0
+    max_gap_idx = -1
+    for i in range(len(sorted_lons) - 1):
+        gap = sorted_lons[i + 1] - sorted_lons[i]
+        if gap > max_gap:
+            max_gap = gap
+            max_gap_idx = i
+
+    if wrap_gap >= max_gap:
+        # Pins sit in a contiguous arc that does not cross the dateline.
+        return (sorted_lons[0] + sorted_lons[-1]) / 2.0, direct_span
+
+    # The widest "hole" is between two adjacent pins — cut the circle there
+    # and the enclosing arc wraps through ±180.
+    span = 360.0 - max_gap
+    start = sorted_lons[max_gap_idx + 1]
+    end = sorted_lons[max_gap_idx] + 360.0
+    center = (start + end) / 2.0
+    if center > 180:
+        center -= 360
+    return center, span
+
+
+async def generate_pins_map(
+    pins,
+    labels=None,
+    width=600,
+    height=400,
+    color='ff0000',
+    pin_size='l',
+    zoom=None,
+    center=None,
+    min_zoom=0,
+    max_zoom=7,
+    padding_factor=1.2,
+):
+    """Draw pins on a Mapbox static map, auto-fitting center and zoom to all pins.
+
+    pins: list of (lat, lon) tuples.
+    labels: optional list (same length as pins) of pin labels; each entry may be
+            a string matching [0-9]{1,2} or [a-z], or None for an unlabeled pin.
+    pin_size: 'l' (large, supports labels) or 's' (small, no labels).
+    zoom / center: explicit overrides. When omitted they are auto-computed
+                   using web Mercator math and antimeridian-aware longitude
+                   bounds so globally scattered pins fit via the shortest arc.
+
+    Returns BytesIO on success, None on error or empty input.
+    """
+    if not pins:
+        return None
+
+    lats = [p[0] for p in pins]
+    lons = [p[1] for p in pins]
+
+    # Compute bounding box in web Mercator space, antimeridian-aware, so that
+    # e.g. Kansas (−95°) + Tokyo (+140°) resolves to a ~220° arc centered on
+    # the Pacific rather than a 246° span centered on Turkey.
+    auto_center_lon, lon_span = _enclosing_lon_arc(lons)
+    y_min = _lat_to_mercator_y(min(lats))
+    y_max = _lat_to_mercator_y(max(lats))
+
+    if center is None:
+        center_lat = _mercator_y_to_lat((y_min + y_max) / 2)
+        center_lon = auto_center_lon
+    else:
+        center_lat, center_lon = center
+
+    if zoom is None:
+        if len(pins) == 1:
+            zoom = max_zoom
+        else:
+            # Pixel-aware Mercator fit: at zoom z the world is TILE_SIZE·2^z
+            # pixels wide, so we need lon_frac·TILE_SIZE·2^z ≤ width and
+            # likewise for height. Take the min so both axes fit.
+            TILE_SIZE = 256
+            lon_frac = max(lon_span / 360.0, 1e-9) * padding_factor
+            lat_frac = max((y_max - y_min) / (2 * math.pi), 1e-9) * padding_factor
+            zoom_x = math.log2(width / (TILE_SIZE * lon_frac))
+            zoom_y = math.log2(height / (TILE_SIZE * lat_frac))
+            zoom_fit = min(zoom_x, zoom_y)
+            zoom = max(min_zoom, min(max_zoom, round(zoom_fit, 2)))
+
+    layers = []
+    for i, (lat, lon) in enumerate(pins):
+        label_suffix = ""
+        if labels and i < len(labels) and labels[i] is not None:
+            label_suffix = f"-{labels[i]}"
+        layers.append(f"pin-{pin_size}{label_suffix}+{color}({lon},{lat})")
+
+    layer_str = ",".join(layers)
+    url = (
+        f"{BASE_URL}/{layer_str}/{center_lon},{center_lat},{zoom}/{width}x{height}"
+        f"?access_token={MAPBOX}"
+    )
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    return None
+                return BytesIO(await resp.read())
+    except Exception:
+        return None
