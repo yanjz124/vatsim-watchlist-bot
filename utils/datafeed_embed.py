@@ -11,7 +11,7 @@ from dateutil import parser
 from datetime import timezone
 
 from utils import fetch_vatsim_data, get_frequencies_for_callsign
-from utils.geo import reverse_geocode
+from utils.geo import reverse_geocode, UNKNOWN
 from utils.mapbox_static import generate_map_image
 from utils.track_history import (
     record_position, get_track, smart_zoom_for_track,
@@ -241,11 +241,16 @@ async def _attach_position_and_map(embed, client_data, is_atc):
     heading = live.get("heading", "N/A")
     qnh = _format_qnh(live)
 
+    # Geocoding is optional: with no OPENCAGE_KEY configured every lookup
+    # returns UNKNOWN, and printing that on every embed reads as broken
+    # rather than deliberate. Omit the line instead.
     location = await reverse_geocode(lat, lon)
-    position_info = (
-        f"{lat:.5f}, {lon:.5f}\n{location}\n"
-        f"Alt: {current_alt} ft | GS: {groundspeed} kts | HDG: {heading}°"
+    coords = f'{lat:.5f}, {lon:.5f}'
+    telemetry = (
+        f'Alt: {current_alt} ft | GS: {groundspeed} kts | HDG: {heading}°'
     )
+    parts = [coords] + ([location] if location and location != UNKNOWN else []) + [telemetry]
+    position_info = chr(10).join(parts)
     if qnh:
         position_info += f" | {qnh}"
     embed.add_field(name="Position", value=position_info, inline=False)

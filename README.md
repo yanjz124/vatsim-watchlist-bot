@@ -97,6 +97,27 @@ The bot will load the included `extensions/` modules by default. To change which
 
 If the bot is already running, `!invite` produces the same URL for you.
 
+## Optional API keys
+
+The bot runs without any of these; each one just enables a feature. Nothing
+errors or retries when a key is absent.
+
+| Key | Enables | Without it |
+|---|---|---|
+| `DISCORD_TOKEN` | **required** | won't start |
+| `MAPBOX_TOKEN` | position map images on monitor embeds | embeds render with full position telemetry, no map picture |
+| `OPENCAGE_KEY` | a place name under the coordinates | the line is omitted |
+| `VATUSA_TOKEN` | authenticated VATUSA fields (rosters, staff) | public VATUSA data only |
+| `ADMIN_ID` | owner-only commands (`!update`, `!restart`, …) | those commands are open |
+
+**A note on cost if you host this for other people.** Maps and geocoding are
+billed per request against *your* account, and the request rate scales with
+(servers x watched entries currently online) — one call each per embed, on a
+5-minute refresh for pilots and 10 for controllers. Geocoding is cached
+(controllers never move, so they cost one lookup no matter how long they sit),
+but map images are not cacheable. If you're running a shared instance, either
+leave `MAPBOX_TOKEN` unset or put a billing alert on it.
+
 ## Permissions & Intents
 
 Required permissions:
