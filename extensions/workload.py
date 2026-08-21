@@ -8,7 +8,7 @@ import discord
 from discord.ext import commands, tasks
 from discord.utils import utcnow
 
-from config import CHANNEL_ID, atc_rating
+from config import atc_rating
 from utils.data_manager import (
     load_workload_monitor,
     save_workload_monitor,
@@ -16,6 +16,7 @@ from utils.data_manager import (
     record_workload_trigger,
     clear_workload_stats,
 )
+from utils import iter_feed_channels
 from utils.transceivers_cache import get_transceivers_data
 from utils.vatsim_datafeed import fetch_vatsim_data
 
@@ -315,14 +316,15 @@ def _table_embeds(controllers: list, threshold: int, *, filter_label: str | None
 class WorkloadMonitor(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        state = load_workload_monitor()
-        self.monitor_enabled = state['enabled']
-        self.threshold = state['threshold']
-        # Maps callsign -> last escalation band that triggered an alert.
-        # Absent = controller is currently below threshold (reset state).
-        # Band N = count is in [threshold + N*ESCALATION_STEP, threshold + (N+1)*ESCALATION_STEP).
-        self._alerted_band: dict[str, int] = {}
+        # Maps (guild_id, callsign) -> last escalation band that triggered an
+        # alert. Absent = controller is currently below that guild's threshold.
+        # Band N = count in [threshold + N*STEP, threshold + (N+1)*STEP).
+        # Keyed per guild because thresholds differ between servers.
+        self._alerted_band: dict[tuple, int] = {}
         self.monitor_loop.start()
+
+    def threshold_for(self, guild_id):
+        return load_workload_monitor(guild_id)['threshold']
 
     async def cog_unload(self):
         self.monitor_loop.cancel()
@@ -331,7 +333,12 @@ class WorkloadMonitor(commands.Cog):
 
     @tasks.loop(seconds=MONITOR_INTERVAL)
     async def monitor_loop(self):
-        if not self.monitor_enabled:
+        targets = []
+        for guild_id, channel in iter_feed_channels(self.bot, 'workload'):
+            state = load_workload_monitor(guild_id)
+            if state['enabled']:
+                targets.append((guild_id, channel, state['threshold']))
+        if not targets:
             return
 
         try:
@@ -340,13 +347,21 @@ class WorkloadMonitor(commands.Cog):
             print(f"[Workload Monitor] Error: {e}")
             return
 
-        # Reset state for any callsign that dropped back below threshold.
-        above_cs = {c["callsign"] for c in controllers if c["pilot_count"] >= self.threshold}
-        for cs in list(self._alerted_band):
-            if cs not in above_cs:
-                del self._alerted_band[cs]
+        for guild_id, channel, threshold in targets:
+            try:
+                await self._alert_guild(guild_id, channel, threshold, controllers)
+            except Exception as e:
+                print(f"[Workload Monitor] guild {guild_id} failed: {e}")
 
-        channel = self.bot.get_channel(CHANNEL_ID)
+    async def _alert_guild(self, guild_id, channel, threshold, controllers):
+        # Reset state for any callsign that dropped back below this guild's
+        # threshold. Only touch this guild's slice of the band cache.
+        above_cs = {c["callsign"] for c in controllers if c["pilot_count"] >= threshold}
+        for key in list(self._alerted_band):
+            cached_guild_id, cs = key
+            if cached_guild_id == guild_id and cs not in above_cs:
+                del self._alerted_band[key]
+
         if not channel:
             return
 
@@ -357,11 +372,12 @@ class WorkloadMonitor(commands.Cog):
         # or climbs into the next band of ESCALATION_STEP pilots.
         to_alert = []
         for c in controllers:
-            if c["pilot_count"] < self.threshold:
+            if c["pilot_count"] < threshold:
                 continue
-            band = (c["pilot_count"] - self.threshold) // ESCALATION_STEP
-            if band > self._alerted_band.get(c["callsign"], -1):
-                self._alerted_band[c["callsign"]] = band
+            band = (c["pilot_count"] - threshold) // ESCALATION_STEP
+            key = (guild_id, c["callsign"])
+            if band > self._alerted_band.get(key, -1):
+                self._alerted_band[key] = band
                 to_alert.append(c)
 
         if not to_alert:
@@ -371,6 +387,7 @@ class WorkloadMonitor(commands.Cog):
         for c in to_alert:
             try:
                 record_workload_trigger(
+                    guild_id,
                     callsign=c["callsign"],
                     cid=c.get("cid"),
                     name=c.get("name"),
@@ -380,7 +397,7 @@ class WorkloadMonitor(commands.Cog):
             except Exception as e:
                 print(f"[Workload Monitor] stats record failed: {e}")
 
-        for embed in _table_embeds(to_alert, self.threshold):
+        for embed in _table_embeds(to_alert, threshold):
             await channel.send(embed=embed)
 
     @monitor_loop.before_loop
@@ -411,7 +428,7 @@ class WorkloadMonitor(commands.Cog):
         if arg.lower() == "all" or arg == "":
             if arg == "":
                 # Default: only show positions at or above threshold - 5
-                cutoff = self.threshold - 5
+                cutoff = self.threshold_for(ctx.guild.id) - 5
                 controllers = [c for c in controllers if c["pilot_count"] >= cutoff]
                 filter_label = f"showing ≥ {cutoff} pilots"
             # else "all": no filtering
@@ -426,7 +443,7 @@ class WorkloadMonitor(commands.Cog):
             filter_label = f"filter: {prefix}"
 
         await msg.delete()
-        for embed in _table_embeds(controllers, self.threshold, filter_label=filter_label):
+        for embed in _table_embeds(controllers, self.threshold_for(ctx.guild.id), filter_label=filter_label):
             await ctx.send(embed=embed)
 
     @commands.command(name="wlmon")
@@ -439,22 +456,24 @@ class WorkloadMonitor(commands.Cog):
           !wlmon <number>  — set pilot-count alert threshold (e.g. !wlmon 20)
         """
         if not arg:
-            status = "enabled" if self.monitor_enabled else "disabled"
+            state = load_workload_monitor(ctx.guild.id)
+            enabled, threshold = state['enabled'], state['threshold']
+            status = "enabled" if enabled else "disabled"
             embed = discord.Embed(
                 title="Workload Monitor Status",
-                color=discord.Color.green() if self.monitor_enabled else discord.Color.greyple(),
+                color=discord.Color.green() if enabled else discord.Color.greyple(),
             )
             embed.add_field(name="Status", value=status.capitalize(), inline=True)
-            embed.add_field(name="Threshold", value=f"{self.threshold} pilots", inline=True)
+            embed.add_field(name="Threshold", value=f"{threshold} pilots", inline=True)
             embed.add_field(name="Escalation", value=f"every +{ESCALATION_STEP}", inline=True)
             embed.add_field(
                 name="Alert logic",
                 value=(
-                    f"Fires when a controller first crosses **{self.threshold}** pilots, "
+                    f"Fires when a controller first crosses **{threshold}** pilots, "
                     f"then again each time the count climbs another **{ESCALATION_STEP}** "
-                    f"(i.e. {self.threshold}, {self.threshold + ESCALATION_STEP}, "
-                    f"{self.threshold + ESCALATION_STEP * 2}, …). "
-                    f"Resets if the count drops below **{self.threshold}**."
+                    f"(i.e. {threshold}, {threshold + ESCALATION_STEP}, "
+                    f"{threshold + ESCALATION_STEP * 2}, …). "
+                    f"Resets if the count drops below **{threshold}**."
                 ),
                 inline=False,
             )
@@ -471,15 +490,15 @@ class WorkloadMonitor(commands.Cog):
 
         lower = arg.lower()
 
+        state = load_workload_monitor(ctx.guild.id)
+
         if lower == "on":
-            self.monitor_enabled = True
-            save_workload_monitor(self.monitor_enabled, self.threshold)
+            save_workload_monitor(ctx.guild.id, True, state['threshold'])
             await ctx.send(
-                f"Workload monitor **enabled**. Threshold: **{self.threshold}** pilots."
+                f"Workload monitor **enabled**. Threshold: **{state['threshold']}** pilots."
             )
         elif lower == "off":
-            self.monitor_enabled = False
-            save_workload_monitor(self.monitor_enabled, self.threshold)
+            save_workload_monitor(ctx.guild.id, False, state['threshold'])
             await ctx.send("Workload monitor **disabled**.")
         else:
             try:
@@ -487,9 +506,11 @@ class WorkloadMonitor(commands.Cog):
                 if n < 1:
                     await ctx.send("Threshold must be at least 1.")
                     return
-                self.threshold = n
-                self._alerted_band.clear()
-                save_workload_monitor(self.monitor_enabled, self.threshold)
+                # Drop this guild's escalation bands so the new threshold
+                # re-arms cleanly instead of inheriting stale bands.
+                for key in [k for k in self._alerted_band if k[0] == ctx.guild.id]:
+                    del self._alerted_band[key]
+                save_workload_monitor(ctx.guild.id, state['enabled'], n)
                 await ctx.send(f"Workload alert threshold set to **{n}** pilots.")
             except ValueError:
                 await ctx.send(
@@ -513,15 +534,15 @@ class WorkloadMonitor(commands.Cog):
 
         arg = (arg or "").strip()
         if arg.lower() == "clear":
-            clear_workload_stats()
+            clear_workload_stats(ctx.guild.id)
             await ctx.send("Workload trigger statistics cleared.")
             return
 
-        stats = load_workload_stats()
+        stats = load_workload_stats(ctx.guild.id)
         if not stats:
             await ctx.send(
                 f"No workload triggers recorded yet "
-                f"(threshold: {self.threshold}, escalation step: +{ESCALATION_STEP})."
+                f"(threshold: {self.threshold_for(ctx.guild.id)}, escalation step: +{ESCALATION_STEP})."
             )
             return
 
@@ -624,7 +645,7 @@ class WorkloadMonitor(commands.Cog):
                 color=discord.Color.orange(),
                 timestamp=utcnow(),
             )
-            embed.set_footer(text=f"Threshold {self.threshold}, escalation +{ESCALATION_STEP}")
+            embed.set_footer(text=f"Threshold {self.threshold_for(ctx.guild.id)}, escalation +{ESCALATION_STEP}")
             await ctx.send(embed=embed)
 
     async def _send_wlstats_grouped(self, ctx, stats: dict, cs_prefix: str | None):
@@ -734,7 +755,7 @@ class WorkloadMonitor(commands.Cog):
                 color=discord.Color.orange(),
                 timestamp=utcnow(),
             )
-            embed.set_footer(text=f"Threshold {self.threshold}, escalation +{ESCALATION_STEP}")
+            embed.set_footer(text=f"Threshold {self.threshold_for(ctx.guild.id)}, escalation +{ESCALATION_STEP}")
             await ctx.send(embed=embed)
 
 

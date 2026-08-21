@@ -5,8 +5,7 @@ import aiohttp
 from discord.ext import commands, tasks
 from discord.utils import utcnow
 from dateutil import parser
-from utils import load_atis_monitor, update_atis_state
-from config import CHANNEL_ID
+from utils import load_atis_monitor, update_atis_state, iter_feed_channels
 
 
 class AtisMonitor(commands.Cog):
@@ -19,17 +18,25 @@ class AtisMonitor(commands.Cog):
 
     @tasks.loop(minutes=5)
     async def atis_loop(self):
-        """Check ATIS updates every 5 minutes"""
-        atis_data = load_atis_monitor()
+        """Check ATIS updates every 5 minutes.
 
-        if not atis_data:
+        Guilds keep their own airport lists, but the upstream ATIS is the
+        same for everybody -- so build the union of watched airports, fetch
+        each one once, then dispatch to whichever guilds watch it. Last-seen
+        codes stay per guild, so a server that adds an airport later doesn't
+        inherit another server's state.
+        """
+        # airport -> [(guild_id, channel, that guild's stored atis state)]
+        watchers = {}
+        for guild_id, channel in iter_feed_channels(self.bot, 'atis'):
+            atis_data = load_atis_monitor(guild_id)
+            for airport in atis_data:
+                watchers.setdefault(airport, []).append((guild_id, channel, atis_data))
+
+        if not watchers:
             return
 
-        channel = self.bot.get_channel(CHANNEL_ID)
-        if not channel:
-            return
-
-        for airport in atis_data.keys():
+        for airport, subscribers in watchers.items():
             try:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(f"https://atis.info/api/{airport}") as resp:
@@ -46,44 +53,40 @@ class AtisMonitor(commands.Cog):
                     current_code = atis_entry.get("code", "N/A")
                     current_updated = atis_entry.get("updatedAt", "N/A")
 
-                    # Get last known state
-                    last_codes = atis_data[airport].get('last_codes', {})
-                    last_code = last_codes.get(atis_type)
+                    atis_airport = atis_entry.get("airport", airport)
+                    time_str = atis_entry.get("time", "N/A")
+                    datis = atis_entry.get("datis", "No ATIS text available.")
 
-                    # If code changed or this is the first check, send update
-                    if last_code != current_code:
-                        atis_airport = atis_entry.get("airport", airport)
-                        time_str = atis_entry.get("time", "N/A")
-                        datis = atis_entry.get("datis", "No ATIS text available.")
+                    try:
+                        dt = parser.isoparse(current_updated)
+                        updated_display = dt.strftime("%Y-%m-%d %H:%MZ")
+                    except Exception:
+                        updated_display = current_updated
 
-                        # Parse updated_at for better display
-                        try:
-                            dt = parser.isoparse(current_updated)
-                            updated_display = dt.strftime("%Y-%m-%d %H:%MZ")
-                        except Exception:
-                            updated_display = current_updated
+                    for guild_id, channel, atis_data in subscribers:
+                        last_codes = atis_data.get(airport, {}).get('last_codes', {})
+                        last_code = last_codes.get(atis_type)
+                        if last_code == current_code:
+                            continue
 
-                        # Build embed
-                        embed = discord.Embed(
-                            title=f"{atis_airport} {atis_type.upper()} ATIS - {current_code} - {time_str}Z",
-                            description=datis,
-                            color=discord.Color.green(),
-                            timestamp=utcnow()
-                        )
-                        embed.set_footer(text=f"Updated: {updated_display}")
-
-                        # Send to channel
-                        try:
-                            if last_code is None:
-                                # First check, don't spam with "new" message
-                                pass
-                            else:
+                        # First observation for a guild seeds state silently
+                        # rather than announcing an ATIS that didn't just change.
+                        if last_code is not None:
+                            embed = discord.Embed(
+                                title=f"{atis_airport} {atis_type.upper()} ATIS - {current_code} - {time_str}Z",
+                                description=datis,
+                                color=discord.Color.green(),
+                                timestamp=utcnow()
+                            )
+                            embed.set_footer(text=f"Updated: {updated_display}")
+                            try:
                                 await channel.send(embed=embed)
-                        except Exception as e:
-                            print(f"Error sending ATIS update for {airport}: {e}")
+                            except Exception as e:
+                                print(f"Error sending ATIS update for {airport} "
+                                      f"in guild {guild_id}: {e}")
 
-                        # Update state
-                        update_atis_state(airport, atis_type, current_code, current_updated)
+                        update_atis_state(guild_id, airport, atis_type,
+                                          current_code, current_updated)
 
             except Exception as e:
                 print(f"Error checking ATIS for {airport}: {e}")

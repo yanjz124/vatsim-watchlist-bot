@@ -3,6 +3,7 @@
 
 import discord
 from discord.ext import commands
+from utils import is_feed_enabled, set_feed_enabled
 from discord.utils import utcnow
 from datetime import timezone
 from typing import Optional
@@ -27,7 +28,7 @@ class NewCidMonitor(commands.Cog):
         # No action - show current highest CID
         if action is None:
             highest_cid = newcid_loop.highest_cid
-            mute_status = "muted" if newcid_loop.muted else "unmuted"
+            mute_status = "unmuted" if is_feed_enabled(ctx.guild.id, 'newcid') else "muted"
 
             embed = discord.Embed(
                 title="📊 Highest CID Tracker",
@@ -132,23 +133,23 @@ class NewCidMonitor(commands.Cog):
         
         # Handle mute action
         if action in ["mute", "off", "disable"]:
-            if newcid_loop.muted:
+            if not is_feed_enabled(ctx.guild.id, 'newcid'):
                 await ctx.send("New CID alerts are already **muted**.")
             else:
-                newcid_loop.muted = True
+                set_feed_enabled(ctx.guild.id, 'newcid', False)
                 await ctx.send("New CID alerts are now **muted**. 🔇")
         
         # Handle unmute action
         elif action in ["unmute", "on", "enable"]:
-            if not newcid_loop.muted:
+            if is_feed_enabled(ctx.guild.id, 'newcid'):
                 await ctx.send("New CID alerts are already **unmuted**.")
             else:
-                newcid_loop.muted = False
+                set_feed_enabled(ctx.guild.id, 'newcid', True)
                 await ctx.send("New CID alerts are now **unmuted**. 🔔")
         
         # Handle status action
         elif action == "status":
-            mute_status = "muted" if newcid_loop.muted else "unmuted"
+            mute_status = "unmuted" if is_feed_enabled(ctx.guild.id, 'newcid') else "muted"
             highest_cid = newcid_loop.highest_cid
             
             status_msg = f"**Highest CID:** {highest_cid:,}\n" if highest_cid > 0 else "**Highest CID:** No data yet\n"

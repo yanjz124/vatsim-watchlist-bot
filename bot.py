@@ -5,9 +5,11 @@ from config import DISCORD_TOKEN
 import asyncio
 from utils import start_transceivers_cache
 
-intents = discord.Intents.all()
+# Intents.all() requests every privileged intent, which Discord only grants
+# an unverified bot in a handful of servers. Ask for what we actually use:
+# message_content for the ! prefix commands, guilds for channel resolution.
+intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True
 
 bot = commands.Bot(command_prefix='!',
                    intents=intents,
@@ -15,6 +17,7 @@ bot = commands.Bot(command_prefix='!',
                    )
 
 extensions = [
+    "extensions.guild_setup",
     "extensions.core",
     "extensions.vatsim",
     "extensions.cid_monitor",

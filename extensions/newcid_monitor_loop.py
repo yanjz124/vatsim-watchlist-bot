@@ -5,7 +5,9 @@ from discord.ext import commands, tasks
 from discord.utils import utcnow
 from datetime import timezone
 from utils import fetch_vatsim_data, build_status_embed
-from config import CHANNEL_ID, atc_rating, pilot_rating
+from config import atc_rating, pilot_rating
+from utils import iter_feed_channels
+import io as _io
 import json
 import os
 
@@ -17,7 +19,6 @@ class NewCidMonitorLoop(commands.Cog):
         self.bot = bot
         self.highest_cid = self._load_highest_cid()
         self.alerted_cids = set()  # Track CIDs we've already alerted for
-        self.muted = False  # Default to unmuted (alerts enabled)
         self.newcid_monitor_loop.start()
     
     async def cog_unload(self):
@@ -81,7 +82,7 @@ class NewCidMonitorLoop(commands.Cog):
                 self._save_highest_cid(current_highest)
                 
                 # Send alerts for each connection with the new CID (if not muted)
-                if not self.muted and current_highest not in self.alerted_cids:
+                if current_highest not in self.alerted_cids:
                     self.alerted_cids.add(current_highest)
                     await self.send_new_cid_alerts(new_cid_clients, old_highest)
         
@@ -93,11 +94,15 @@ class NewCidMonitorLoop(commands.Cog):
         await self.bot.wait_until_ready()
     
     async def send_new_cid_alerts(self, clients, old_highest):
-        """Send alerts for new highest CID detected"""
-        channel = self.bot.get_channel(CHANNEL_ID)
-        if not channel:
+        """Send alerts for new highest CID detected.
+
+        The highest-CID watermark is a property of the network, not of any
+        one guild, so it stays global -- only the delivery fans out.
+        """
+        targets = list(iter_feed_channels(self.bot, 'newcid'))
+        if not targets:
             return
-        
+
         for client_data in clients:
             cid = client_data.get("cid")
             name = client_data.get("name", "N/A")
@@ -236,11 +241,24 @@ class NewCidMonitorLoop(commands.Cog):
 
             embed.set_footer(text=f"New highest CID on the network")
 
-            # Send the message
-            if file:
-                await channel.send(embed=embed, file=file)
-            else:
-                await channel.send(embed=embed)
+            # A discord.File's buffer is consumed by the first upload, so
+            # snapshot the bytes and hand each guild its own File.
+            file_bytes = None
+            filename = None
+            if file is not None:
+                filename = file.filename
+                file.fp.seek(0)
+                file_bytes = file.fp.read()
+
+            for guild_id, channel in targets:
+                try:
+                    if file_bytes is not None:
+                        fresh = discord.File(_io.BytesIO(file_bytes), filename=filename)
+                        await channel.send(embed=embed, file=fresh)
+                    else:
+                        await channel.send(embed=embed)
+                except Exception as e:
+                    print(f"[NewCID Monitor] send failed for guild {guild_id}: {e}")
 
 
 async def setup(bot):

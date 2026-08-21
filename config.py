@@ -8,10 +8,16 @@ VATUSA_API_KEY = os.getenv("VATUSA_TOKEN")
 AVIATIONSTACK_KEY = os.getenv("AVIATIONSTACK_KEY")
 MAPBOX = os.getenv("MAPBOX_TOKEN")
 OPENCAGE_KEY = os.getenv("OPENCAGE_KEY")
-# Optional numeric IDs. Use environment variables if you need them; default to 0 (unset).
+# CHANNEL_ID is legacy and optional. Alert channels are now configured per
+# server with /setchannel and stored in data/guild_config.json. This is only
+# read once at startup: if it is set and no guild has been configured yet, the
+# owning guild adopts it and any pre-multi-guild data files are migrated into
+# it, so an existing single-server install keeps working untouched. Leave it
+# at 0 on a fresh deployment.
 CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))
 ROLE_ID = int(os.getenv("ROLE_ID", "0"))
-# Admin/owner id for admin-only commands. Set to 0 to disable admin-only restrictions.
+# Bot owner's Discord user id, for owner-only commands (!update, !restart,
+# !shutdown, !loadext). Set to 0 to disable those restrictions.
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 atc_rating = {

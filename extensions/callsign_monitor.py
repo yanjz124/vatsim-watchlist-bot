@@ -39,18 +39,18 @@ class Csmon(commands.Cog):
 
         rule = parts[0].upper()
         name = " ".join(parts[1:]) if len(parts) > 1 else rule  # Default to rule if no name
-        add_callsign_monitor(rule, name)
+        add_callsign_monitor(ctx.guild.id, rule, name)
         await ctx.send(f"Monitoring callsign rule `{rule}` as `{name}`.")
 
     @csmon.command(name="remove")
     async def remove(self, ctx, rule: str):
-        remove_callsign_monitor(rule.upper())
+        remove_callsign_monitor(ctx.guild.id, rule.upper())
         await ctx.send(f"Removed callsign rule `{rule}` from monitoring.")
 
     @csmon.command(name="list")
     async def list(self, ctx):
         try:
-            rule_map = load_callsign_monitor()
+            rule_map = load_callsign_monitor(ctx.guild.id)
             if not rule_map:
                 await ctx.send("No callsign rules are currently being monitored.")
                 return
@@ -102,7 +102,7 @@ class Csmute(commands.Cog):
         target = args[0]
         if target.startswith("-") and len(target) > 1:
             pattern = target[1:].upper()
-            if remove_callsign_mute(pattern):
+            if remove_callsign_mute(ctx.guild.id, pattern):
                 await ctx.send(f"Unmuted `{pattern}`.")
             else:
                 await ctx.send(f"`{pattern}` is not muted.")
@@ -117,14 +117,14 @@ class Csmute(commands.Cog):
                 await ctx.send(f"Invalid duration `{args[1]}` — expected an integer (hours).")
                 return
 
-        pat, expires_at = add_callsign_mute(pattern, hours)
+        pat, expires_at = add_callsign_mute(ctx.guild.id, pattern, hours)
         if expires_at is None:
             await ctx.send(f"Muted `{pat}` **permanently**.")
         else:
             await ctx.send(f"Muted `{pat}` until <t:{expires_at}:f> (<t:{expires_at}:R>).")
 
     async def _send_list(self, ctx):
-        mutes = load_callsign_mutes()
+        mutes = load_callsign_mutes(ctx.guild.id)
         if not mutes:
             await ctx.send("No callsigns are currently muted.")
             return

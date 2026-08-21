@@ -4,9 +4,10 @@ import discord
 from discord.ext import commands, tasks
 from discord.utils import utcnow
 import re
-from utils import fetch_vatsim_data, build_status_embed, load_a1_monitor, load_a9_monitor
-from utils.data_manager import load_fake_names
-from config import CHANNEL_ID, atc_rating, pilot_rating
+from utils import (fetch_vatsim_data, build_status_embed, load_a1_monitor,
+                   load_a9_monitor, iter_feed_channels)
+from utils.data_manager import load_fake_names, load_a4_muted
+from config import atc_rating, pilot_rating
 from collections import defaultdict
 
 
@@ -15,51 +16,68 @@ class CocMonitorLoop(commands.Cog):
     
     def __init__(self, bot):
         self.bot = bot
-        self.enabled = True  # Default to enabled
-        # Default A4 violation alerts to muted unless explicitly enabled
-        try:
-            from utils.data_manager import load_a4_muted
-            self.a4_muted = load_a4_muted()
-        except Exception:
-            self.a4_muted = True
-        self.alerted_users = set()  # Track CID+callsign combinations already alerted
-        self.a1_status_cache = {}  # Track A1 keyword matches
-        self.a9_status_cache = {}  # Track A9 keyword matches
+        # Per-guild state. Whether the feed runs at all for a guild is the
+        # 'coc' subscription in guild_config; `disabled_guilds` is the
+        # in-session !cocmonitor off switch on top of that.
+        self.disabled_guilds = set()
+        self.alerted_users = set()   # (guild_id, "cid:callsign") already alerted
+        self.a1_status_cache = {}    # (guild_id, keyword) -> fingerprints
+        self.a9_status_cache = {}    # (guild_id, keyword) -> fingerprints
         self.coc_monitor_loop.start()
+
+    def is_enabled(self, guild_id):
+        return guild_id not in self.disabled_guilds
+
+    def a4_muted(self, guild_id):
+        try:
+            return load_a4_muted(guild_id)
+        except Exception:
+            return True
     
     async def cog_unload(self):
         self.coc_monitor_loop.cancel()
     
     @tasks.loop(seconds=15)
     async def coc_monitor_loop(self):
-        """Monitor for CoC A4 violations and keyword matches every 15 seconds"""
-        if not self.enabled:
+        """Monitor for CoC A4 violations and keyword matches every 15 seconds.
+
+        One datafeed fetch, then replayed against each subscribed guild --
+        fake-name lists and A1/A9 keywords are per guild, so the matches
+        differ even though the network snapshot is shared.
+        """
+        targets = [(g, c) for g, c in iter_feed_channels(self.bot, 'coc')
+                   if self.is_enabled(g)]
+        if not targets:
             return
-        
+
         try:
             data = await fetch_vatsim_data()
             if not isinstance(data, dict):
                 return
-            
-            # Check A4 violations
-            violations = await self.check_a4_violations(data)
-            if violations:
-                await self.send_violation_alerts(violations)
-            
-            # Check A1 keyword matches
-            await self.check_keyword_matches(data, load_a1_monitor(), self.a1_status_cache, "A1")
-            
-            # Check A9 keyword matches
-            await self.check_keyword_matches(data, load_a9_monitor(), self.a9_status_cache, "A9")
-        
         except Exception as e:
             print(f"Error in CoC monitor loop: {e}")
+            return
+
+        for guild_id, channel in targets:
+            try:
+                violations = await self.check_a4_violations(guild_id, data)
+                if violations:
+                    await self.send_violation_alerts(guild_id, channel, violations)
+
+                await self.check_keyword_matches(
+                    guild_id, channel, data, load_a1_monitor(guild_id),
+                    self.a1_status_cache, "A1")
+                await self.check_keyword_matches(
+                    guild_id, channel, data, load_a9_monitor(guild_id),
+                    self.a9_status_cache, "A9")
+            except Exception as e:
+                print(f"Error in CoC monitor loop for guild {guild_id}: {e}")
     
     @coc_monitor_loop.before_loop
     async def before_loop(self):
         await self.bot.wait_until_ready()
     
-    async def check_a4_violations(self, data):
+    async def check_a4_violations(self, guild_id, data):
         """
         Check for VATSIM CoC A4(b) name convention violations
         
@@ -71,7 +89,7 @@ class CocMonitorLoop(commands.Cog):
         5. Their VATSIM CID number
         """
         violations = []
-        fake_names = load_fake_names()
+        fake_names = load_fake_names(guild_id)
         
         # Check all pilots
         for pilot in data.get("pilots", []):
@@ -167,13 +185,11 @@ class CocMonitorLoop(commands.Cog):
         
         return None
     
-    async def send_violation_alerts(self, violations):
+    async def send_violation_alerts(self, guild_id, channel, violations):
         """Send alerts for new violations only (not already alerted)"""
-        # Skip if A4 alerts are muted
-        if self.a4_muted:
+        if self.a4_muted(guild_id):
             return
-        
-        channel = self.bot.get_channel(CHANNEL_ID)
+
         if not channel:
             return
         
@@ -182,8 +198,8 @@ class CocMonitorLoop(commands.Cog):
             user_key = f"{v['cid']}:{v['callsign']}"
             
             # Only send alert if we haven't alerted for this CID+callsign combo
-            if user_key not in self.alerted_users:
-                self.alerted_users.add(user_key)
+            if (guild_id, user_key) not in self.alerted_users:
+                self.alerted_users.add((guild_id, user_key))
                 
                 # CoC A4(b) rule text (shortened for real-time alerts)
                 rule_text = (
@@ -219,11 +235,15 @@ class CocMonitorLoop(commands.Cog):
                 
                 await channel.send(embed=embed)
         
-        # Clean up alerted_users set - remove users no longer online
+        # Clean up alerted_users - drop users no longer online, but only
+        # within this guild's slice of the set.
         current_user_keys = {f"{v['cid']}:{v['callsign']}" for v in violations}
-        self.alerted_users = self.alerted_users.intersection(current_user_keys)
+        self.alerted_users = {
+            (g, k) for (g, k) in self.alerted_users
+            if g != guild_id or k in current_user_keys
+        }
 
-    async def check_keyword_matches(self, data, keywords, status_cache, monitor_name):
+    async def check_keyword_matches(self, guild_id, channel, data, keywords, status_cache, monitor_name):
         """Check for keyword matches in ATIS, remarks, and routes"""
         if not keywords:
             return
@@ -273,10 +293,9 @@ class CocMonitorLoop(commands.Cog):
                 if re.search(pattern, searchable_text):
                     current_matches[keyword].append(client)
         
-        channel = self.bot.get_channel(CHANNEL_ID)
         if not channel:
             return
-        
+
         for keyword, matched_clients in current_matches.items():
             new_fingerprints = []
             
@@ -299,7 +318,7 @@ class CocMonitorLoop(commands.Cog):
                 }
                 new_fingerprints.append(fingerprint)
                 
-                old_fps = status_cache.get(keyword, [])
+                old_fps = status_cache.get((guild_id, keyword), [])
                 if fingerprint not in old_fps:
                     embed, file = await build_status_embed(
                         client_data=client_data,
@@ -313,18 +332,21 @@ class CocMonitorLoop(commands.Cog):
                     else:
                         await channel.send(embed=embed)
             
-            status_cache[keyword] = new_fingerprints
+            status_cache[(guild_id, keyword)] = new_fingerprints
         
-        # Check for disconnections
-        for keyword in list(status_cache.keys()):
-            if keyword not in current_matches and status_cache[keyword]:
+        # Check for disconnections -- only this guild's cache entries
+        for cache_key in list(status_cache.keys()):
+            cached_guild_id, keyword = cache_key
+            if cached_guild_id != guild_id:
+                continue
+            if keyword not in current_matches and status_cache[cache_key]:
                 embed = discord.Embed(
                     title=f"{monitor_name} Match offline: {keyword}",
                     description=f"No clients currently match keyword: {keyword}",
                     color=discord.Color.red()
                 )
                 await channel.send(embed=embed)
-                status_cache[keyword] = []
+                status_cache[cache_key] = []
 
 
 async def setup(bot):

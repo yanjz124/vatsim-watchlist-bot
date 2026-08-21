@@ -20,11 +20,11 @@ class TypeMonitorLoop(VatsimMonitorLoop):
     async def cog_unload(self):
         self.type_monitor_loop.cancel()
 
-    def load_config(self):
-        return load_type_monitor()
+    def load_config(self, guild_id):
+        return load_type_monitor(guild_id)
 
-    def match_clients(self, pilots, controllers):
-        type_rules = self.load_config()
+    def match_clients(self, guild_id, pilots, controllers):
+        type_rules = self.load_config(guild_id)
         current_matches = defaultdict(list)
         for client in pilots:
             fp = client.get("flight_plan")
@@ -42,10 +42,10 @@ class TypeMonitorLoop(VatsimMonitorLoop):
         regex_pattern = "^" + re.escape(pattern).replace(r"\*", ".*") + "$"
         return re.match(regex_pattern, aircraft_short.upper()) is not None
 
-    def get_display_name(self, key, client_data):
+    def get_display_name(self, guild_id, key, client_data):
         return key
 
-    def get_offline_description(self, key):
+    def get_offline_description(self, guild_id, key):
         return f"{key} is offline", f"No pilots currently match {key}"
 
     @tasks.loop(seconds=15)

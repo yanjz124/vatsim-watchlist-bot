@@ -33,18 +33,18 @@ class Typemon(commands.Cog):
 
         pattern = parts[0].upper()
         name = " ".join(parts[1:]) if len(parts) > 1 else pattern  # Default to pattern if no name
-        add_type_monitor(pattern, name)
+        add_type_monitor(ctx.guild.id, pattern, name)
         await ctx.send(f"Monitoring aircraft type `{pattern}` as `{name}`.")
 
     @typemon.command(name="remove")
     async def remove(self, ctx, pattern: str):
-        remove_type_monitor(pattern.upper())
+        remove_type_monitor(ctx.guild.id, pattern.upper())
         await ctx.send(f"Removed aircraft type `{pattern}` from monitoring.")
 
     @typemon.command(name="list")
     async def list(self, ctx):
         try:
-            rule_map = load_type_monitor()
+            rule_map = load_type_monitor(ctx.guild.id)
             if not rule_map:
                 await ctx.send("No aircraft types are currently being monitored.")
                 return

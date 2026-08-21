@@ -102,7 +102,7 @@ class Atis(commands.Cog):
                     await ctx.send(f"No D-ATIS available for {icao}.")
                     return
 
-        if add_atis_monitor(icao):
+        if add_atis_monitor(ctx.guild.id, icao):
             await ctx.send(f"Now monitoring ATIS for {icao}.")
         else:
             await ctx.send(f"{icao} is already being monitored.")
@@ -111,7 +111,7 @@ class Atis(commands.Cog):
     async def atismon_remove(self, ctx, icao: str):
         """Remove an airport from ATIS monitoring"""
         icao = icao.upper()
-        if remove_atis_monitor(icao):
+        if remove_atis_monitor(ctx.guild.id, icao):
             await ctx.send(f"Stopped monitoring ATIS for {icao}.")
         else:
             await ctx.send(f"{icao} is not being monitored.")
@@ -119,7 +119,7 @@ class Atis(commands.Cog):
     @atismon.command(name="list")
     async def atismon_list(self, ctx):
         """List all monitored airports"""
-        atis_data = load_atis_monitor()
+        atis_data = load_atis_monitor(ctx.guild.id)
 
         if not atis_data:
             await ctx.send("No airports are currently being monitored for ATIS.")

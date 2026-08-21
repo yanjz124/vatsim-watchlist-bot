@@ -19,11 +19,11 @@ class VATSIMMonitor(VatsimMonitorLoop):
     async def cog_unload(self):
         self.monitor_loop.cancel()
 
-    def load_config(self):
-        return get_cid_to_monitor()
+    def load_config(self, guild_id):
+        return get_cid_to_monitor(guild_id)
 
-    def match_clients(self, pilots, controllers):
-        config = self.load_config()
+    def match_clients(self, guild_id, pilots, controllers):
+        config = self.load_config(guild_id)
         found_cids = defaultdict(list)
         for client in pilots + controllers:
             cid = int(client["cid"])
@@ -31,12 +31,12 @@ class VATSIMMonitor(VatsimMonitorLoop):
                 found_cids[cid].append(client)
         return dict(found_cids)
 
-    def get_display_name(self, key, client_data):
-        config = self.load_config()
+    def get_display_name(self, guild_id, key, client_data):
+        config = self.load_config(guild_id)
         return config.get(key, str(key))
 
-    def get_offline_description(self, key):
-        config = self.load_config()
+    def get_offline_description(self, guild_id, key):
+        config = self.load_config(guild_id)
         name = config.get(key, str(key))
         return f"{name} went offline", f"CID {key} is no longer connected to the network."
 

@@ -11,8 +11,7 @@ from typing import Optional
 import discord
 from discord.ext import commands, tasks
 
-from config import CHANNEL_ID
-from utils.data_manager import load_faa_muted, save_faa_muted
+from utils import iter_feed_channels, is_feed_enabled, set_feed_enabled
 
 
 ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -46,11 +45,6 @@ class FAAAdvMonitor(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.seen = _load_seen()
-        # Load persisted muted state (default: muted)
-        try:
-            self.muted = load_faa_muted()
-        except Exception:
-            self.muted = True
         self.session = aiohttp.ClientSession()
         self.faa_loop.start()
 
@@ -62,10 +56,16 @@ class FAAAdvMonitor(commands.Cog):
         except Exception:
             pass
 
+    def _targets(self):
+        """Guilds subscribed to the FAA feed. Advisory dedup (self.seen) is
+        deliberately global: the upstream feed is the same for everyone, so a
+        guild that subscribes later starts from the current advisories rather
+        than replaying a backlog."""
+        return list(iter_feed_channels(self.bot, 'faa'))
+
     @tasks.loop(minutes=10)
     async def faa_loop(self):
-        # Respect mute setting: do not post automatically when muted
-        if getattr(self, "muted", True):
+        if not self._targets():
             return
         try:
             async with self.session.get(LIST_URL, timeout=aiohttp.ClientTimeout(total=30)) as resp:
@@ -100,11 +100,7 @@ class FAAAdvMonitor(commands.Cog):
 
             _save_seen(self.seen)
 
-            channel = self.bot.get_channel(CHANNEL_ID)
-            if not channel:
-                print("FAA monitor: target channel not found")
-                return
-
+            embeds = []
             for item in new_items:
                 embed = discord.Embed(
                     title="FAA: New advisory / special publication",
@@ -114,11 +110,14 @@ class FAAAdvMonitor(commands.Cog):
                 )
                 embed.add_field(name="Link", value=item["url"], inline=False)
                 embed.set_footer(text="Source: fly.faa.gov")
+                embeds.append(embed)
 
-                try:
-                    await channel.send(embed=embed)
-                except Exception as e:
-                    print(f"FAA monitor: failed to send embed: {e}")
+            for guild_id, channel in self._targets():
+                for embed in embeds:
+                    try:
+                        await channel.send(embed=embed)
+                    except Exception as e:
+                        print(f"FAA monitor: failed to send embed to guild {guild_id}: {e}")
         else:
             # Fallback to raw text parsing
             body_text = soup.get_text(separator="\n")
@@ -129,17 +128,13 @@ class FAAAdvMonitor(commands.Cog):
             self.seen.add(full_digest)
             _save_seen(self.seen)
 
-            channel = self.bot.get_channel(CHANNEL_ID)
-            if not channel:
-                print("FAA monitor: target channel not found")
-                return
-
             embeds = self._create_embeds_from_sections(sections)
-            for embed in embeds:
-                try:
-                    await channel.send(embed=embed)
-                except Exception as e:
-                    print(f"FAA monitor: failed to send embed: {e}")
+            for guild_id, channel in self._targets():
+                for embed in embeds:
+                    try:
+                        await channel.send(embed=embed)
+                    except Exception as e:
+                        print(f"FAA monitor: failed to send embed to guild {guild_id}: {e}")
 
     @commands.command(name="faaadv")
     async def faaadv(self, ctx, mode: Optional[str] = None, limit: int = 5):
@@ -153,18 +148,17 @@ class FAAAdvMonitor(commands.Cog):
         if mode:
             m = mode.lower()
             if m in ("mute", "off", "disable"):
-                save_faa_muted(True)
-                self.muted = True
-                await ctx.send("FAA advisory auto-posting is now **muted**. Use `!faaadv unmute` to re-enable.")
+                set_feed_enabled(ctx.guild.id, 'faa', False)
+                await ctx.send("FAA advisory auto-posting is now **muted** in this server. "
+                               "Use `!faaadv unmute` to re-enable.")
                 return
             if m in ("unmute", "on", "enable"):
-                save_faa_muted(False)
-                self.muted = False
-                await ctx.send("FAA advisory auto-posting is now **unmuted**.")
+                set_feed_enabled(ctx.guild.id, 'faa', True)
+                await ctx.send("FAA advisory auto-posting is now **unmuted** in this server.")
                 return
             if m == "status":
-                status = "muted" if getattr(self, "muted", True) else "unmuted"
-                await ctx.send(f"FAA advisory auto-posting is currently **{status}**.")
+                status = "unmuted" if is_feed_enabled(ctx.guild.id, 'faa') else "muted"
+                await ctx.send(f"FAA advisory auto-posting is currently **{status}** in this server.")
                 return
 
         # Debug: announce locally that the command was invoked (helps diagnose permissions / handler execution)

@@ -26,17 +26,17 @@ class CocMonitor(commands.Cog):
             return
         
         if state is None:
-            status = "enabled" if coc_loop.enabled else "disabled"
-            await ctx.send(f"CoC real-time monitoring is currently **{status}**. Use `!cocmonitor on` or `!cocmonitor off` to toggle.")
+            status = "enabled" if coc_loop.is_enabled(ctx.guild.id) else "disabled"
+            await ctx.send(f"CoC real-time monitoring is currently **{status}** in this server. Use `!cocmonitor on` or `!cocmonitor off` to toggle.")
             return
         
         state = state.lower()
         if state in ["on", "enable", "enabled", "true", "1"]:
-            coc_loop.enabled = True
-            await ctx.send("CoC real-time monitoring is now **enabled**.")
+            coc_loop.disabled_guilds.discard(ctx.guild.id)
+            await ctx.send("CoC real-time monitoring is now **enabled** in this server.")
         elif state in ["off", "disable", "disabled", "false", "0"]:
-            coc_loop.enabled = False
-            await ctx.send("CoC real-time monitoring is now **disabled**.")
+            coc_loop.disabled_guilds.add(ctx.guild.id)
+            await ctx.send("CoC real-time monitoring is now **disabled** in this server.")
         else:
             await ctx.send("Invalid option. Use `!cocmonitor on` or `!cocmonitor off`.")
     
@@ -49,8 +49,9 @@ class CocMonitor(commands.Cog):
             await ctx.send("CoC monitor loop is not loaded.")
             return
         
-        count = len(coc_loop.alerted_users)
-        coc_loop.alerted_users.clear()
+        mine = {(g, k) for (g, k) in coc_loop.alerted_users if g == ctx.guild.id}
+        count = len(mine)
+        coc_loop.alerted_users -= mine
         await ctx.send(f"CoC monitor alert cache cleared. ({count} entries removed) Will re-alert for any current violations on next scan.")
 
     @commands.command(name="a4check")
@@ -81,7 +82,7 @@ class CocMonitor(commands.Cog):
         action = action.lower()
         
         if action == "list":
-            fake_names = load_fake_names()
+            fake_names = load_fake_names(ctx.guild.id)
             
             if not fake_names:
                 await ctx.send("No fake name patterns configured.")
@@ -100,7 +101,7 @@ class CocMonitor(commands.Cog):
                 await ctx.send("Please provide a pattern to add. Usage: `!fakename add <pattern>`")
                 return
             
-            if add_fake_name(pattern):
+            if add_fake_name(ctx.guild.id, pattern):
                 await ctx.send(f"Added fake name pattern: `{pattern}`")
             else:
                 await ctx.send(f"Pattern `{pattern}` is already in the list.")
@@ -110,7 +111,7 @@ class CocMonitor(commands.Cog):
                 await ctx.send("Please provide a pattern to remove. Usage: `!fakename remove <pattern>`")
                 return
             
-            if remove_fake_name(pattern):
+            if remove_fake_name(ctx.guild.id, pattern):
                 await ctx.send(f"Removed fake name pattern: `{pattern}`")
             else:
                 await ctx.send(f"Pattern `{pattern}` not found in the list.")
@@ -129,7 +130,7 @@ class CocMonitor(commands.Cog):
         action = action.lower()
         
         if action == "list":
-            keywords = load_a1_monitor()
+            keywords = load_a1_monitor(ctx.guild.id)
             if not keywords:
                 await ctx.send("No A1 keywords are currently being monitored.")
                 return
@@ -147,13 +148,13 @@ class CocMonitor(commands.Cog):
                 await ctx.send("Please provide a keyword to monitor. Usage: `!a1mon add <keyword>`")
                 return
             
-            keywords = load_a1_monitor()
+            keywords = load_a1_monitor(ctx.guild.id)
             if keyword in keywords:
                 await ctx.send(f"Keyword `{keyword}` is already being monitored.")
                 return
             
             keywords.append(keyword)
-            save_a1_monitor(keywords)
+            save_a1_monitor(ctx.guild.id, keywords)
             await ctx.send(f"Now monitoring keyword: `{keyword}` (supports * wildcard)")
         
         elif action == "remove":
@@ -161,13 +162,13 @@ class CocMonitor(commands.Cog):
                 await ctx.send("Please provide a keyword to remove. Usage: `!a1mon remove <keyword>`")
                 return
             
-            keywords = load_a1_monitor()
+            keywords = load_a1_monitor(ctx.guild.id)
             if keyword not in keywords:
                 await ctx.send(f"Keyword `{keyword}` is not being monitored.")
                 return
             
             keywords.remove(keyword)
-            save_a1_monitor(keywords)
+            save_a1_monitor(ctx.guild.id, keywords)
             await ctx.send(f"Stopped monitoring keyword: `{keyword}`")
         
         else:
@@ -185,24 +186,16 @@ class CocMonitor(commands.Cog):
         from utils.data_manager import save_a4_muted
 
         if action is None or action.lower() == "status":
-            status = "muted" if coc_loop.a4_muted else "unmuted"
-            await ctx.send(f"A4 violation alerts are currently **{status}**.")
+            status = "muted" if coc_loop.a4_muted(ctx.guild.id) else "unmuted"
+            await ctx.send(f"A4 violation alerts are currently **{status}** in this server.")
             return
         
         action = action.lower()
         if action in ["mute", "off", "disable"]:
-            coc_loop.a4_muted = True
-            try:
-                save_a4_muted(True)
-            except Exception:
-                pass
+            save_a4_muted(ctx.guild.id, True)
             await ctx.send("A4 violation alerts are now **muted**. Use `!a4mon unmute` to re-enable.")
         elif action in ["unmute", "on", "enable"]:
-            coc_loop.a4_muted = False
-            try:
-                save_a4_muted(False)
-            except Exception:
-                pass
+            save_a4_muted(ctx.guild.id, False)
             await ctx.send("A4 violation alerts are now **unmuted**.")
         else:
             await ctx.send("Invalid option. Use `!a4mon mute`, `!a4mon unmute`, or `!a4mon status`.")
@@ -218,7 +211,7 @@ class CocMonitor(commands.Cog):
         action = action.lower()
         
         if action == "list":
-            keywords = load_a9_monitor()
+            keywords = load_a9_monitor(ctx.guild.id)
             if not keywords:
                 await ctx.send("No A9 keywords are currently being monitored.")
                 return
@@ -236,13 +229,13 @@ class CocMonitor(commands.Cog):
                 await ctx.send("Please provide a keyword to monitor. Usage: `!a9mon add <keyword>`")
                 return
             
-            keywords = load_a9_monitor()
+            keywords = load_a9_monitor(ctx.guild.id)
             if keyword in keywords:
                 await ctx.send(f"Keyword `{keyword}` is already being monitored.")
                 return
             
             keywords.append(keyword)
-            save_a9_monitor(keywords)
+            save_a9_monitor(ctx.guild.id, keywords)
             await ctx.send(f"Now monitoring keyword: `{keyword}` (supports * wildcard)")
         
         elif action == "remove":
@@ -250,13 +243,13 @@ class CocMonitor(commands.Cog):
                 await ctx.send("Please provide a keyword to remove. Usage: `!a9mon remove <keyword>`")
                 return
             
-            keywords = load_a9_monitor()
+            keywords = load_a9_monitor(ctx.guild.id)
             if keyword not in keywords:
                 await ctx.send(f"Keyword `{keyword}` is not being monitored.")
                 return
             
             keywords.remove(keyword)
-            save_a9_monitor(keywords)
+            save_a9_monitor(ctx.guild.id, keywords)
             await ctx.send(f"Stopped monitoring keyword: `{keyword}`")
         
         else:
@@ -276,7 +269,7 @@ class CocMonitor(commands.Cog):
         violations = []
         
         # Load fake names from data_manager
-        fake_names = load_fake_names()
+        fake_names = load_fake_names(ctx.guild.id)
         
         # Check all pilots
         for pilot in data.get("pilots", []):

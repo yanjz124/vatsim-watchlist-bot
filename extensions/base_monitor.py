@@ -2,15 +2,22 @@
 
 import discord
 from discord.ext import commands
-from config import atc_rating, pilot_rating, CHANNEL_ID
-from utils import fetch_vatsim_data, build_status_embed
+from config import atc_rating, pilot_rating
+from utils import fetch_vatsim_data, build_status_embed, iter_alert_channels
 import io
 import time
 
 
 class VatsimMonitorLoop(commands.Cog):
     """Base class for VATSIM monitor loops that share fingerprinting,
-    change detection, embed management, and disconnection handling."""
+    change detection, embed management, and disconnection handling.
+
+    Multi-guild: the VATSIM datafeed is network-wide, so a cycle fetches it
+    exactly once and then fans out over every guild that has bound an alert
+    channel, evaluating that guild's own watchlist against the shared
+    snapshot. All three caches are keyed by (guild_id, key) so two guilds
+    watching the same CID each get their own embed in their own channel.
+    """
 
     # Subclass configuration
     INCLUDE_CONTROLLERS = True
@@ -26,19 +33,19 @@ class VatsimMonitorLoop(commands.Cog):
 
     # === Abstract methods (subclass MUST implement) ===
 
-    def load_config(self):
-        """Return the monitoring config (dict or list)."""
+    def load_config(self, guild_id):
+        """Return this guild's monitoring config (dict or list)."""
         raise NotImplementedError
 
-    def match_clients(self, pilots, controllers):
-        """Return {key: [client_data, ...]} of matched clients."""
+    def match_clients(self, guild_id, pilots, controllers):
+        """Return {key: [client_data, ...]} matched against this guild's config."""
         raise NotImplementedError
 
-    def get_display_name(self, key, client_data):
+    def get_display_name(self, guild_id, key, client_data):
         """Return display name for a given monitoring key."""
         raise NotImplementedError
 
-    def get_offline_description(self, key):
+    def get_offline_description(self, guild_id, key):
         """Return (title, description) for the offline embed."""
         raise NotImplementedError
 
@@ -97,9 +104,9 @@ class VatsimMonitorLoop(commands.Cog):
 
         return base_fp, rating, is_atc
 
-    def detect_changes(self, key, base_fp):
+    def detect_changes(self, cache_key, base_fp):
         """Compare fingerprint against cache, return (fingerprint_with_meta, old_fp_list)."""
-        old_fp_list = self.status_cache.get(key, [])
+        old_fp_list = self.status_cache.get(cache_key, [])
         old_fp = old_fp_list[0] if old_fp_list else None
         now_epoch = int(time.time())
 
@@ -113,9 +120,8 @@ class VatsimMonitorLoop(commands.Cog):
         fingerprint["updated_at"] = now_epoch
         return fingerprint, old_fp_list
 
-    async def send_or_update_embed(self, key, client_data, display_name, rating, is_atc, fingerprint, base_fp, old_fp_list):
-        """Send new embed or edit existing one on change."""
-        channel = self.bot.get_channel(CHANNEL_ID)
+    async def send_or_update_embed(self, channel, cache_key, key, client_data, display_name, rating, is_atc, fingerprint, base_fp, old_fp_list):
+        """Send new embed or edit existing one on change, in this guild's channel."""
         if not channel:
             return
 
@@ -132,9 +138,9 @@ class VatsimMonitorLoop(commands.Cog):
                     sent = await channel.send(embed=embed, file=file)
                 else:
                     sent = await channel.send(embed=embed)
-                self.message_cache[key] = sent
+                self.message_cache[cache_key] = sent
                 if self.ENABLE_MAP_REFRESH:
-                    self.last_map_refresh[key] = time.time()
+                    self.last_map_refresh[cache_key] = time.time()
             except Exception as e:
                 print(f"Error sending new message for {key}: {e}")
 
@@ -146,7 +152,7 @@ class VatsimMonitorLoop(commands.Cog):
                 is_atc=is_atc,
                 fingerprint=fingerprint
             )
-            last_msg = self.message_cache.get(key)
+            last_msg = self.message_cache.get(cache_key)
             if last_msg:
                 try:
                     if file:
@@ -154,25 +160,24 @@ class VatsimMonitorLoop(commands.Cog):
                     else:
                         await last_msg.edit(embed=embed, attachments=[])
                     if self.ENABLE_MAP_REFRESH:
-                        self.last_map_refresh[key] = time.time()
+                        self.last_map_refresh[cache_key] = time.time()
                 except Exception as e:
                     print(f"Error editing message for {key}: {e}")
 
-    async def maybe_refresh_map(self, key, client_data, display_name, rating, is_atc, base_fp):
+    async def maybe_refresh_map(self, channel, cache_key, key, client_data, display_name, rating, is_atc, base_fp):
         """Periodic map refresh without fingerprint changes."""
         if not self.ENABLE_MAP_REFRESH:
             return
 
         refresh_interval = self.ATC_REFRESH_INTERVAL if is_atc else self.PILOT_REFRESH_INTERVAL
-        last_refresh = self.last_map_refresh.get(key, 0)
+        last_refresh = self.last_map_refresh.get(cache_key, 0)
         now = time.time()
 
         if now - last_refresh >= refresh_interval:
-            last_msg = self.message_cache.get(key)
-            channel = self.bot.get_channel(CHANNEL_ID)
+            last_msg = self.message_cache.get(cache_key)
             if channel and last_msg:
                 try:
-                    refresh_fp = dict(self.status_cache.get(key, [base_fp])[0])
+                    refresh_fp = dict(self.status_cache.get(cache_key, [base_fp])[0])
                     refresh_fp["updated_keys"] = ["position"]
                     refresh_fp["updated_at"] = int(now)
                     embed, file = await build_status_embed(
@@ -186,11 +191,11 @@ class VatsimMonitorLoop(commands.Cog):
                         await last_msg.edit(embed=embed, attachments=[file])
                     else:
                         await last_msg.edit(embed=embed, attachments=[])
-                    self.last_map_refresh[key] = now
+                    self.last_map_refresh[cache_key] = now
                 except Exception as e:
                     print(f"Error refreshing map for {key}: {e}")
 
-    async def handle_disconnection(self, key):
+    async def handle_disconnection(self, channel, cache_key, key, guild_id):
         """Edit the embed to grey + 'Disconnected' footer, preserving the map.
 
         Two gotchas we hit:
@@ -208,7 +213,7 @@ class VatsimMonitorLoop(commands.Cog):
         Also rebuilds the embed from scratch instead of round-tripping
         through to_dict/from_dict, which carries over the stale image
         URL state we don't want."""
-        last_msg = self.message_cache.get(key)
+        last_msg = self.message_cache.get(cache_key)
         if last_msg is None:
             return
 
@@ -260,22 +265,25 @@ class VatsimMonitorLoop(commands.Cog):
         except Exception as e:
             print(f"Error updating embed footer for disconnected {key}: {e}")
 
-        title, description = self.get_offline_description(key)
+        title, description = self.get_offline_description(guild_id, key)
         embed = discord.Embed(title=title, description=description, color=discord.Color.red())
-        channel = self.bot.get_channel(CHANNEL_ID)
         if channel:
             try:
                 await channel.send(embed=embed)
             except Exception as e:
                 print(f"Error sending offline message for {key}: {e}")
 
-        self.message_cache.pop(key, None)
-        self.last_map_refresh.pop(key, None)
+        self.message_cache.pop(cache_key, None)
+        self.last_map_refresh.pop(cache_key, None)
 
     async def run_monitor_cycle(self):
-        """Main loop body. Call from the subclass @tasks.loop method."""
-        config = self.load_config()
-        if not config:
+        """Main loop body. Call from the subclass @tasks.loop method.
+
+        Fetches the network snapshot once, then replays it against every
+        configured guild's watchlist.
+        """
+        targets = list(iter_alert_channels(self.bot))
+        if not targets:
             return
 
         try:
@@ -293,28 +301,46 @@ class VatsimMonitorLoop(commands.Cog):
         for client in controllers:
             client["_source"] = "controller"
 
-        current_matches = self.match_clients(pilots, controllers)
+        for guild_id, channel in targets:
+            try:
+                await self._run_guild_cycle(guild_id, channel, pilots, controllers)
+            except Exception as e:
+                print(f"[{type(self).__name__}] cycle failed for guild {guild_id}: {e}")
+
+    async def _run_guild_cycle(self, guild_id, channel, pilots, controllers):
+        """Evaluate one guild's watchlist against an already-fetched snapshot."""
+        if not self.load_config(guild_id):
+            return
+
+        current_matches = self.match_clients(guild_id, pilots, controllers)
 
         for key, matched_clients in current_matches.items():
             if not matched_clients:
                 continue
 
+            cache_key = (guild_id, key)
             client_data = matched_clients[0]
-            display_name = self.get_display_name(key, client_data)
+            display_name = self.get_display_name(guild_id, key, client_data)
             base_fp, rating, is_atc = self.build_fingerprint(client_data)
-            fingerprint, old_fp_list = self.detect_changes(key, base_fp)
+            fingerprint, old_fp_list = self.detect_changes(cache_key, base_fp)
 
             await self.send_or_update_embed(
-                key, client_data, display_name, rating, is_atc,
-                fingerprint, base_fp, old_fp_list
+                channel, cache_key, key, client_data, display_name, rating,
+                is_atc, fingerprint, base_fp, old_fp_list
             )
 
-            self.status_cache[key] = [base_fp]
+            self.status_cache[cache_key] = [base_fp]
 
-            await self.maybe_refresh_map(key, client_data, display_name, rating, is_atc, base_fp)
+            await self.maybe_refresh_map(
+                channel, cache_key, key, client_data, display_name, rating,
+                is_atc, base_fp
+            )
 
-        # Disconnections
-        for key in list(self.status_cache.keys()):
-            if key not in current_matches and self.status_cache.get(key):
-                await self.handle_disconnection(key)
-                self.status_cache[key] = []
+        # Disconnections -- only for this guild's slice of the cache
+        for cache_key in list(self.status_cache.keys()):
+            cached_guild_id, key = cache_key
+            if cached_guild_id != guild_id:
+                continue
+            if key not in current_matches and self.status_cache.get(cache_key):
+                await self.handle_disconnection(channel, cache_key, key, guild_id)
+                self.status_cache[cache_key] = []

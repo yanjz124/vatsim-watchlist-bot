@@ -20,15 +20,15 @@ class CallsignMonitor(VatsimMonitorLoop):
     async def cog_unload(self):
         self.callsign_monitor_loop.cancel()
 
-    def load_config(self):
-        return load_callsign_monitor()
+    def load_config(self, guild_id):
+        return load_callsign_monitor(guild_id)
 
-    def match_clients(self, pilots, controllers):
-        callsigns = self.load_config()
+    def match_clients(self, guild_id, pilots, controllers):
+        callsigns = self.load_config(guild_id)
         current_matches = defaultdict(list)
         for client in pilots + controllers:
             callsign = client.get("callsign", "").upper()
-            if is_callsign_muted(callsign):
+            if is_callsign_muted(guild_id, callsign):
                 continue
             for mon in callsigns:
                 pattern = mon.replace("*", ".*").upper()
@@ -36,10 +36,10 @@ class CallsignMonitor(VatsimMonitorLoop):
                     current_matches[mon].append(client)
         return dict(current_matches)
 
-    def get_display_name(self, key, client_data):
+    def get_display_name(self, guild_id, key, client_data):
         return key
 
-    def get_offline_description(self, key):
+    def get_offline_description(self, guild_id, key):
         return f"{key} is offline", f"No clients currently match {key}"
 
     @tasks.loop(seconds=15)

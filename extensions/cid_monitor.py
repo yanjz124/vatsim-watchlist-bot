@@ -54,18 +54,18 @@ class Cidmon(commands.Cog):
             if not resolved_name:
                 resolved_name = str(cid)
 
-            add_cid_to_monitor(cid, resolved_name)
+            add_cid_to_monitor(ctx.guild.id, cid, resolved_name)
             await ctx.send(f"Monitoring CID {cid} as `{resolved_name}`.")
 
     @cidmon.command(name="remove")
     async def monitor_remove(self, ctx, cid: int):
-        remove_cid_from_monitor(cid)
+        remove_cid_from_monitor(ctx.guild.id, cid)
         await ctx.send(f"Removed CID `{cid}` from monitoring.")
 
     @cidmon.command(name="list")
     async def list(self, ctx):
         try:
-            cid_map = get_cid_to_monitor()
+            cid_map = get_cid_to_monitor(ctx.guild.id)
             if not cid_map:
                 await ctx.send("No CIDs are currently being monitored.")
                 return

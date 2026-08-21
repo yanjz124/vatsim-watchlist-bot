@@ -30,6 +30,24 @@ from .data_manager import (
     add_atis_monitor,
     remove_atis_monitor,
     update_atis_state,
+    load_guild_json,
+    save_guild_json,
+    migrate_flat_files_to_guild,
+    purge_guild,
+)
+
+from .guild_config import (
+    FEEDS,
+    get_alert_channel_id,
+    set_alert_channel,
+    is_feed_enabled,
+    set_feed_enabled,
+    configured_guild_ids,
+    resolve_alert_channel,
+    iter_alert_channels,
+    iter_feed_channels,
+    forget_guild,
+    bootstrap_from_legacy_channel,
 )
 
 from .vatsim_datafeed import fetch_vatsim_data, fetch_user_name
