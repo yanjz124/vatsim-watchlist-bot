@@ -5,6 +5,8 @@ import asyncio
 from urllib.parse import urlparse
 from discord.ext import commands
 
+from config import ADMIN_ID
+
 ROOT = os.path.dirname(os.path.dirname(__file__))
 EXT_DIR = os.path.join(ROOT, "extensions")
 
@@ -13,12 +15,18 @@ ALLOWED_HOSTS = {"raw.githubusercontent.com"}
 
 
 class AdminInstall(commands.Cog):
-    """Admin-only tools for installing single-file extensions remotely.
+    """Owner-only tool for installing single-file extensions remotely.
 
     Command: !installext <url>
-    - Only users with Administrator permission can run this command.
+    - Restricted to ADMIN_ID, the bot owner.
     - Downloads a .py file and places it into `extensions/`.
     - Backs up existing file to .bak before replacing and attempts rollback if load fails.
+
+    This runs arbitrary Python inside the bot process, so the gate must be the
+    bot owner and nothing else. It was previously guarded by
+    has_permissions(administrator=True), which is the *caller's* permission in
+    *their own* guild -- i.e. anyone who invited the bot to a server they
+    administer. On an invitable bot that is remote code execution on the host.
     """
 
     def __init__(self, bot):
@@ -27,18 +35,22 @@ class AdminInstall(commands.Cog):
     async def cog_unload(self):
         return None
 
-    @commands.has_permissions(administrator=True)
     @commands.command(name="installext")
     async def installext(self, ctx, url: str):
-        """Install or update a single extension .py file from a URL.
+        """Install or update a single extension .py file from a URL (owner only).
 
         Usage:
           !installext https://raw.githubusercontent.com/user/repo/main/extensions/myext.py
 
         Notes:
-          - Caller must have the Discord Administrator permission.
+          - Restricted to ADMIN_ID. With ADMIN_ID unset (0) nobody can run it.
           - By default only raw.githubusercontent.com is allowed; change ALLOWED_HOSTS if needed.
+            Note the allowlist is not a security control -- anyone can host a
+            file on raw.githubusercontent.com. The owner check is the control.
         """
+        if ctx.author.id != ADMIN_ID:
+            return await ctx.send("Unauthorized.")
+
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
             return await ctx.send("Only http(s) URLs are allowed.")
@@ -54,15 +66,14 @@ class AdminInstall(commands.Cog):
         dest_path = os.path.join(EXT_DIR, filename)
         module_name = f"extensions.{filename[:-3]}"
 
-        await ctx.trigger_typing()
-
         # Download
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-                    if resp.status != 200:
-                        return await ctx.send(f"Failed to download: HTTP {resp.status}")
-                    content = await resp.text()
+            async with ctx.typing():
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                        if resp.status != 200:
+                            return await ctx.send(f"Failed to download: HTTP {resp.status}")
+                        content = await resp.text()
         except Exception as e:
             return await ctx.send(f"Download error: {e}")
 

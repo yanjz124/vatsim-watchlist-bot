@@ -16,8 +16,12 @@ OPENCAGE_KEY = os.getenv("OPENCAGE_KEY")
 # at 0 on a fresh deployment.
 CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))
 ROLE_ID = int(os.getenv("ROLE_ID", "0"))
-# Bot owner's Discord user id, for owner-only commands (!update, !restart,
-# !shutdown, !loadext). Set to 0 to disable those restrictions.
+# Bot owner's Discord user id. Gates the commands that control the bot
+# process itself: !update, !restart, !restartlinux, !shutdown, !loadext,
+# !unloadext, !installext. Global, not per-server.
+# Leaving it at 0 does NOT open those commands -- the check is
+# `author.id != ADMIN_ID`, so an unset value denies everyone. That is the
+# intended failure mode: an unconfigured bot is locked, not wide open.
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 atc_rating = {

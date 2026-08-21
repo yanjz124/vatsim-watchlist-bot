@@ -109,7 +109,7 @@ errors or retries when a key is absent.
 | `OPENCAGE_KEY` | a place name under the coordinates | the line is omitted |
 | `OPENCAGE_DAILY_CAP` | ceiling on geocode requests per UTC day (default 2000) | — |
 | `VATUSA_TOKEN` | authenticated VATUSA fields (rosters, staff) | public VATUSA data only |
-| `ADMIN_ID` | owner-only commands (`!update`, `!restart`, …) | those commands are open |
+| `ADMIN_ID` | owner-only commands (`!update`, `!restart`, `!installext`, …) | those commands are locked for everyone (fails closed) |
 
 **A note on cost if you host this for other people.** Maps and geocoding are
 billed per request against *your* account, and the request rate scales with
