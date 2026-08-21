@@ -3,7 +3,15 @@ import json
 import time as _time
 import fnmatch as _fnmatch
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
+# Where the JSON state lives. Defaults to <repo>/data, which is right when
+# this package sits at the top of the deployment.
+#
+# It is NOT right when core is vendored a level down -- e.g. consumed as a
+# submodule at <deployment>/core, where module-relative resolution silently
+# points at <deployment>/core/data and every watchlist reads back empty. Such
+# a deployment must set BOT_DATA_DIR to its own data directory.
+DATA_DIR = os.environ.get("BOT_DATA_DIR") or os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), 'data')
 
 
 def ensure_data_dir():
