@@ -61,7 +61,7 @@ class CocMonitor(commands.Cog):
         
         try:
             data = await fetch_vatsim_data()
-            violations = await self.check_a4_violations(data)
+            violations = await self.check_a4_violations(ctx.guild.id, data)
             
             if violations:
                 await self.send_a4_violation_embeds(ctx, violations)
@@ -255,7 +255,7 @@ class CocMonitor(commands.Cog):
         else:
             await ctx.send("Invalid action. Use `add`, `remove`, or `list`.")
 
-    async def check_a4_violations(self, data):
+    async def check_a4_violations(self, guild_id, data):
         """
         Check for VATSIM CoC A4(b) name convention violations
         
@@ -268,8 +268,8 @@ class CocMonitor(commands.Cog):
         """
         violations = []
         
-        # Load fake names from data_manager
-        fake_names = load_fake_names(ctx.guild.id)
+        # Load this guild's fake-name patterns
+        fake_names = load_fake_names(guild_id)
         
         # Check all pilots
         for pilot in data.get("pilots", []):
