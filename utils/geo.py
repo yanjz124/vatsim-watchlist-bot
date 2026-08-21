@@ -27,8 +27,9 @@ OPENCAGE_KEY = os.getenv("OPENCAGE_KEY")
 _TTL_SECONDS = 24 * 60 * 60
 _MAX_ENTRIES = 4096
 
-# Cache cell size by altitude band: (min_altitude_ft, decimal places).
-# 2 dp ~ 1.1 km, 1 dp ~ 11 km, 0.5 deg ~ 55 km.
+# Cache cell size by altitude band: (min_altitude_ft, cell size in degrees).
+# 0.01 deg ~ 1.1 km, 0.1 deg ~ 11 km, 2.0 deg ~ 170 km of longitude at
+# mid-latitudes.
 # At cruise we deliberately report region-only (see _format), which is both
 # more truthful -- an aircraft at FL370 is not "in" a city -- and what makes
 # a genuinely coarse cell safe. 2 degrees is ~170 km of longitude at
@@ -89,7 +90,6 @@ def quota_stats():
     if _spend["day"] != _today():
         return 0, _DAILY_CAP
     return _spend["count"], _DAILY_CAP
-
 
 
 def _cache_key(lat: float, lon: float, altitude_ft=None):
