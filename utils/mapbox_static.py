@@ -122,6 +122,15 @@ def _altitude_colored_path_layers(path_coords, path_altitudes):
 async def generate_map_image(center_lat, center_lon, pins=None,
                              path_coords=None, path_altitudes=None,
                              zoom=None, width=600, height=400):
+    """Render a Mapbox static image, or None if one can't be produced.
+
+    Always returns BytesIO or None -- never an error string. The request URL
+    carries the access token as a query parameter, so nothing derived from it
+    may be handed back to a caller.
+    """
+    if not MAPBOX:
+        return None
+
     layers = []
 
     # Add path if available. Mapbox Static Images allows at most 100 overlay
@@ -167,15 +176,22 @@ async def generate_map_image(center_lat, center_lon, pins=None,
         f"?access_token={MAPBOX}"
     )
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            if resp.status != 200:
-                error_text = await resp.text()
-                error_msg = f"Mapbox Error {resp.status}:\n```{error_text[:1000]}```"
-                error_url = f"URL:\n```{url[:1000]}```"
-                return error_msg + "\n" + error_url
-            data = await resp.read()
-            return BytesIO(data)
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    # Log, never return: the URL carries ?access_token=, and
+                    # callers have historically sent this value straight to
+                    # Discord. 429s become the common case once the bot is in
+                    # more than a handful of servers.
+                    error_text = await resp.text()
+                    print(f'[mapbox] static image request failed '
+                          f'({resp.status}): {error_text[:300]}')
+                    return None
+                return BytesIO(await resp.read())
+    except Exception as e:
+        print(f'[mapbox] static image request errored: {type(e).__name__}: {e}')
+        return None
 
 
 def _lat_to_mercator_y(lat):
@@ -284,6 +300,9 @@ async def generate_pins_map(
             zoom_y = math.log2(height / (TILE_SIZE * lat_frac))
             zoom_fit = min(zoom_x, zoom_y)
             zoom = max(min_zoom, min(max_zoom, round(zoom_fit, 2)))
+
+    if not MAPBOX:
+        return None
 
     layers = []
     for i, (lat, lon) in enumerate(pins):
