@@ -2,20 +2,47 @@
 
 This document lists the bot's built-in commands, grouped by extension. Use the `!` prefix (default) in any channel the bot can read.
 
+Two levels of permission appear below:
+
+- **(owner-only)** — checked against `ADMIN_ID`, the bot owner. Global.
+- **(Manage Server)** — checked against the caller's permission in the server
+  they're calling from. Server admins configure their own server.
+
+Watchlists and settings are per server: `!cidmon add` in one server has no
+effect in another.
+
+## Server setup (`extensions/guild_setup.py`)
+
+Available as slash commands so they're discoverable right after an invite;
+each also works with the `!` prefix.
+
+- `/setchannel [#channel]` or `!setchannel [#channel]` (Manage Server)
+  - Choose where this server's alerts post. Defaults to the current channel.
+    Nothing posts until this is set. Verifies the bot can send messages and
+    embed links there.
+- `/config` or `!config`
+  - Show this server's alert channel and which global feeds are on.
+- `/feeds [feed] [on|off]` or `!feeds [<feed> on|off]` (Manage Server to change)
+  - Subscribe this server to a network-wide feed. Feeds: `faa`, `newcid`,
+    `atis`, `workload`, `coc`. All default to **off**. With no arguments,
+    shows the same panel as `/config`.
+- `!invite`
+  - Generate an invite link for this bot with the required permissions.
+
 ## Core / Admin
 - `!dm @User <message>`
   - Send a DM to a user with your message. Usage: `!dm @User Hello there`.
-- `!update` (admin-only)
+- `!update` (owner-only)
   - Pulls the latest code from the git remote and attempts to install any updated requirements.
-- `!restart` (admin-only)
+- `!restart` (owner-only)
   - Pulls, installs requirements, and restarts the bot.
-- `!shutdown` (admin-only)
+- `!shutdown` (owner-only)
   - Save state and shut down the bot.
-- `!loadext <module.path>` (admin-only)
+- `!loadext <module.path>` (owner-only)
   - Load an extension at runtime, e.g. `!loadext extensions.myext`.
-- `!unloadext <module.path>` (admin-only)
+- `!unloadext <module.path>` (owner-only)
   - Unload an extension at runtime.
-- `!installext <url>` (admin-only, Admin permission required)
+- `!installext <url>` (owner-only, Admin permission required)
   - Download a single `.py` extension from a URL and install it into `extensions/`.
 
 ## VATSIM commands (`extensions/vatsim.py`)
@@ -65,6 +92,9 @@ This document lists the bot's built-in commands, grouped by extension. Use the `
 ## FAA / Advisories (`extensions/faa_adv_monitor.py`, `extensions/faa_restrictions.py`)
 - `!faaadv [new] [limit]`
   - Fetch FAA advisories. `new` shows only unseen advisories; `limit` controls how many to post.
+- `!faaadv [mute|unmute|status]`
+  - Toggle automatic FAA advisory posting for this server. Equivalent to
+    `/feeds feed:faa`.
 - `!faares [REQUESTING] [PROVIDING]`
   - Fetch compact FAA restriction entries (defaults to ALL/ALL).
 - `!faaresmon [REQUESTING] [PROVIDING]` / `!faaresmon STOP`
@@ -75,6 +105,35 @@ This document lists the bot's built-in commands, grouped by extension. Use the `
   - Show highest CID tracked and toggle alerts.
 - `!resetcid` (admin)
   - Reset the highest CID tracker.
+
+## Watchlists (`cid_monitor.py`, `callsign_monitor.py`, `type_monitor.py`)
+Each server keeps its own lists; these need no feed subscription.
+
+- `!cidmon [add|remove|list] <CID> [name]`
+  - Watch specific VATSIM CIDs.
+- `!csmon [add|remove|list] <RULE> [name]`
+  - Watch callsign patterns, `*` wildcards allowed (e.g. `CXK*`).
+- `!csmute`
+  - List this server's active callsign mutes.
+- `!csmute <PATTERN> [hours]`
+  - Suppress alerts for callsigns matching `PATTERN` (`*` wildcards allowed)
+    without removing the monitor rule. Defaults to 24 hours; `0` or negative
+    makes it permanent. Expired mutes are pruned automatically.
+- `!csmute -<PATTERN>`
+  - Unmute (note the leading `-`).
+- `!typemon [add|remove|list] <PATTERN> [name]`
+  - Watch aircraft types (e.g. `B738`, `A320*`). Pilots only.
+
+## Workload (`extensions/workload.py`)
+- `!wl [filter]`
+  - Show current controller workload (pilots per controller).
+- `!wlmon [on|off|<number>]`
+  - Toggle workload alerts for this server, or set the pilot-count threshold.
+    Also needs the `workload` feed enabled via `/feeds`.
+- `!wlstats [all|cs [prefix]|<prefix>|clear]`
+  - Statistics on which controllers have tripped the workload alert: trigger
+    counts, peak pilot count, and first/last trigger times. `cs` groups by
+    callsign across CIDs; `clear` wipes this server's recorded stats.
 
 ## System / Host (`extensions/system_stats.py`)
 - `!sys` (aliases: `!piusage`, `!sysstats`, `!sysinfo`)

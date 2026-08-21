@@ -2,10 +2,45 @@
 
 This repository contains a Discord bot that monitors VATSIM data and provides useful alerts and utilities for controllers and pilots. It is designed to be configurable and easy to deploy.
 
+One bot instance can serve many Discord servers. Each server picks its own
+alert channel, keeps its own watchlists, and opts into whichever network-wide
+feeds it wants — nothing is shared between servers.
+
 ## Features
 - VATSIM data monitoring and notifications
-- CID/callsign/type monitors with persistent JSON-backed state
+- CID/callsign/type monitors with persistent JSON-backed state, scoped per server
+- Position embeds with a live map trail coloured by altitude
+- Real-world ATIS change alerts, FAA advisories, controller workload alerts
+- Code-of-Conduct keyword and name-convention monitoring
 - Moderation / CoC tools (optional)
+
+## Adding the bot to a server
+
+Invite it, then tell it where to talk:
+
+1. **`/setchannel #your-channel`** — the channel alerts post to. Nothing posts
+   until this is set. Requires the **Manage Server** permission.
+2. **`/feeds`** — subscribe to network-wide feeds. All of them are **off by
+   default**, so a fresh invite never floods a server.
+3. **`!cidmon add <CID>`**, **`!csmon add <CALLSIGN>`**, **`!typemon add <TYPE>`** —
+   build the server's watchlist. Watchlists need no subscription: a server with
+   an empty watchlist is silent, and one with entries gets alerts for exactly
+   those entries.
+
+`/config` shows the current channel and feed settings. `!invite` generates an
+invite link for the running bot with the right permissions preselected.
+
+### Watchlists vs. global feeds
+
+Two different things share the word "monitor":
+
+| | Scope | Opt-in |
+|---|---|---|
+| **Watchlists** (`!cidmon`, `!csmon`, `!typemon`) | Only the CIDs / callsigns / types that server added | None needed — empty list means silent |
+| **Global feeds** (`faa`, `newcid`, `atis`, `workload`, `coc`) | Network-wide, identical for every server | `/feeds`, default off |
+
+Per-server settings live in `data/guild_config.json`; watchlists live in the
+other `data/*.json` files keyed by guild id.
 
 ## Requirements
 - Python 3.9+
@@ -55,19 +90,39 @@ The bot will load the included `extensions/` modules by default. To change which
 ## Creating a Discord Bot (quick start)
 1. Go to the Discord Developer Portal: https://discord.com/developers/applications and create a new Application.
 2. In the application page open the **Bot** tab and click **Add Bot**. Under the **Token** section click **Reset Token** (or **Copy**) and save the token — this becomes your `DISCORD_TOKEN`.
-3. Under **OAuth2 → URL Generator** select the `bot` scope and (optionally) `applications.commands` if you plan to use slash commands. In **Bot Permissions** choose the permissions your server needs (see next section). Copy the generated invite URL and open it to invite the bot to a server you administer.
+3. Under **OAuth2 → URL Generator** select **both** the `bot` and
+   `applications.commands` scopes — the second one is required for
+   `/setchannel`, `/config` and `/feeds` to appear. In **Bot Permissions**
+   choose the permissions below, then copy the generated invite URL.
+
+If the bot is already running, `!invite` produces the same URL for you.
 
 ## Permissions & Intents
-- Required minimum permissions: **View Channels**, **Send Messages**, **Embed Links**, **Read Message History**. These let the bot read and post messages and send embeds.
-- Optional permissions depends on features: **Manage Messages** (for moderation-related commands), **Manage Roles** (if extensions modify roles), or **Administrator** (not recommended).
-- Privileged Gateway Intents: If your bot needs member lookups or tracks presence, enable **Server Members Intent** and/or **Presence Intent** in the bot page of the Developer Portal. Then enable the same intents in code. Example (discord.py):
 
-```python
-import discord
-intents = discord.Intents.default()
-intents.members = True  # enable if you enabled Server Members Intent in the portal
-bot = discord.Bot(intents=intents)  # or commands.Bot(..., intents=intents)
-```
+Required permissions:
+
+| Permission | Why |
+|---|---|
+| View Channels | See the alert channel |
+| Send Messages | Post alerts |
+| Embed Links | Every alert is an embed |
+| Attach Files | Position maps are uploaded as images |
+| Read Message History | Edit an existing alert in place instead of reposting |
+
+`/setchannel` verifies Send Messages and Embed Links before accepting a
+channel, and warns if Attach Files is missing (maps silently won't render).
+
+### Privileged intents
+
+The bot requests exactly one privileged intent: **Message Content**, needed
+for the `!` prefix commands. Enable it under **Bot → Privileged Gateway
+Intents** in the Developer Portal. It does *not* need Server Members or
+Presence.
+
+Discord requires bots in **100+ servers** to be verified before privileged
+intents keep working. Below that threshold no verification is needed. If you
+ever cross it and would rather not verify, the prefix commands would have to
+move to slash commands and `intents.message_content` can then be dropped.
 
 - How to get your numeric Discord user id (for `ADMIN_ID`): enable Developer Mode in Discord (Appearance → Advanced → Developer Mode), then right-click your username in a server or the members list and choose **Copy ID**.
 
@@ -109,7 +164,15 @@ Logging & troubleshooting:
 Advanced: you can run the bot inside a Docker container or supervise it with process managers (supervisord, pm2). The simplest approach is systemd for Linux hosts.
 
 ## Customization
-- Admin-only commands check for `ADMIN_ID`. Set this env var to enable administrative control.
+- Owner-only commands (`!update`, `!restart`, `!shutdown`, `!loadext`) check
+  `ADMIN_ID`, the bot owner's Discord user id. These are global, not per-server.
+- Per-server settings (`/setchannel`, `/feeds`) require the **Manage Server**
+  permission in that server — server admins configure their own server without
+  needing to be the bot owner.
+- `CHANNEL_ID` is legacy and optional. It exists so an install that predates
+  multi-guild support keeps working: on first start, if it is set and no server
+  has been configured yet, the owning server adopts it and existing watchlist
+  files are migrated into it. Leave it unset on a fresh deployment.
 
 ## Admin / Auto-update
 - The bot includes an admin extension (`extensions.admin_install`) that can install single-file extensions remotely and admin commands for `update`, `restart`, `shutdown`, `loadext`, and `unloadext`.
@@ -162,6 +225,9 @@ Below is a summary of the bot's built-in commands, grouped by extension. Use the
 		- `!csmon add <RULE> <NAME(optional)>`: Add a callsign rule (e.g., `CXK*`).
 		- `!csmon remove <RULE>`: Remove a monitored callsign rule.
 		- `!csmon list`: List currently monitored callsign rules (paged).
+		- `!csmute`: List active callsign mutes.
+		- `!csmute <PATTERN> [HOURS]`: Mute alerts for matching callsigns (default 24h, `0` = permanent).
+		- `!csmute -<PATTERN>`: Unmute (leading `-`).
 
 	- **Type Monitor (`extensions/type_monitor.py`)**
 		- `!typemon`: Show usage for aircraft type monitoring (group command).
