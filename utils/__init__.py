@@ -59,7 +59,7 @@ from .datafeed_embed import build_status_embed
 
 from .time_utils import format_date, format_time
 
-from .mapbox_static import generate_map_image
+from .mapbox_static import generate_map_image, polygon_layer
 
 from .geo import reverse_geocode
 

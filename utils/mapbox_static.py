@@ -119,9 +119,25 @@ def _altitude_colored_path_layers(path_coords, path_altitudes):
     return layers
 
 
+def polygon_layer(ring, stroke="f43f5e", stroke_width=2, stroke_opacity=0.9,
+                  fill="f43f5e", fill_opacity=0.18):
+    """Encode a closed (lat, lon) ring as a filled Mapbox static overlay.
+
+    Mapbox caps the request URL at 8,192 characters, so rings have to be
+    simplified before they get here -- a few dozen points is the practical
+    budget once a track and pins share the same URL.
+    """
+    if not ring or len(ring) < 3:
+        return None
+    encoded = polyline.encode([(float(a), float(b)) for a, b in ring], precision=5)
+    return (f"path-{stroke_width}+{stroke}-{stroke_opacity}"
+            f"+{fill}-{fill_opacity}({encoded})")
+
+
 async def generate_map_image(center_lat, center_lon, pins=None,
                              path_coords=None, path_altitudes=None,
-                             zoom=None, width=600, height=400):
+                             zoom=None, width=600, height=400,
+                             underlays=None):
     """Render a Mapbox static image, or None if one can't be produced.
 
     Always returns BytesIO or None -- never an error string. The request URL
@@ -131,7 +147,9 @@ async def generate_map_image(center_lat, center_lon, pins=None,
     if not MAPBOX:
         return None
 
-    layers = []
+    # Overlays render in URL order, so anything passed as an underlay is drawn
+    # first and therefore sits beneath the track and pins.
+    layers = [l for l in (underlays or []) if l]
 
     # Add path if available. Mapbox Static Images allows at most 100 overlay
     # features and an 8192-char URL. A noisy/long altitude profile can explode
