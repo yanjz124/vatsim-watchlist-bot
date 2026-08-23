@@ -152,7 +152,7 @@ def polygon_layer(ring, stroke="f43f5e", stroke_width=2, stroke_opacity=0.9,
 async def generate_map_image(center_lat, center_lon, pins=None,
                              path_coords=None, path_altitudes=None,
                              zoom=None, width=600, height=400,
-                             underlays=None, style=None):
+                             underlays=None, style=None, path_casing=False):
     """Render a Mapbox static image, or None if one can't be produced.
 
     Always returns BytesIO or None -- never an error string. The request URL
@@ -173,6 +173,13 @@ async def generate_map_image(center_lat, center_lon, pins=None,
     # the altitude-colored path only while it stays within a safe budget;
     # otherwise fall back to a single simple polyline so the map still renders.
     if path_coords and len(path_coords) >= 2:
+        # Optional dark casing beneath the track. The altitude gradient runs
+        # through yellow at low level, which is most of any approach, and
+        # yellow reads poorly on a light basemap. A wider dark line underneath
+        # makes the track legible whatever colour the gradient picks.
+        if path_casing:
+            layers.append(f"path-6+31313a-0.55({_encode_path(path_coords)})")
+
         alt_layers = []
         if path_altitudes and len(path_altitudes) == len(path_coords):
             alt_layers = _altitude_colored_path_layers(path_coords, path_altitudes)
