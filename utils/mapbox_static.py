@@ -2,6 +2,7 @@ import aiohttp
 from io import BytesIO
 from config import MAPBOX
 import polyline
+from urllib.parse import quote
 import math
 
 BASE_URL = "https://api.mapbox.com/styles/v1/mapbox/streets-v12/static"
@@ -114,7 +115,7 @@ def _altitude_colored_path_layers(path_coords, path_altitudes):
             segments.append([color, [path_coords[i], path_coords[i + 1]]])
 
     for color, pts in segments:
-        encoded = polyline.encode(pts, precision=5)
+        encoded = _encode_path(pts)
         layers.append(f"path-3+{color}-0.9({encoded})")
     return layers
 
@@ -129,7 +130,7 @@ def polygon_layer(ring, stroke="f43f5e", stroke_width=2, stroke_opacity=0.9,
     """
     if not ring or len(ring) < 3:
         return None
-    encoded = polyline.encode([(float(a), float(b)) for a, b in ring], precision=5)
+    encoded = _encode_path([(float(a), float(b)) for a, b in ring])
     return (f"path-{stroke_width}+{stroke}-{stroke_opacity}"
             f"+{fill}-{fill_opacity}({encoded})")
 
@@ -165,7 +166,7 @@ async def generate_map_image(center_lat, center_lon, pins=None,
         if alt_layers and len(alt_layers) <= _MAX_PATH_SEGMENTS:
             layers.extend(alt_layers)
         else:
-            encoded = polyline.encode(path_coords, precision=5)
+            encoded = _encode_path(path_coords)
             layers.append(f"path-3+0000ff-0.9({encoded})")
 
     # Add pins
@@ -210,6 +211,19 @@ async def generate_map_image(center_lat, center_lon, pins=None,
     except Exception as e:
         print(f'[mapbox] static image request errored: {type(e).__name__}: {e}')
         return None
+
+
+def _encode_path(points):
+    """Polyline-encode points for use inside a Mapbox overlay.
+
+    The encoding alphabet is ASCII 63..126, which includes '?' and '#'. Dropped
+    raw into the URL path, a '?' makes everything after it the query string --
+    so access_token is lost and Mapbox answers 401 "Direct access not allowed".
+    It is intermittent by nature: whether a given track encodes to a '?' is
+    pure chance, so most maps render and the occasional one silently doesn't.
+    Percent-encode the payload; the surrounding overlay syntax stays literal.
+    """
+    return quote(polyline.encode(points, precision=5), safe="")
 
 
 def _lat_to_mercator_y(lat):
