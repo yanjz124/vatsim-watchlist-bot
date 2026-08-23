@@ -5,7 +5,21 @@ import polyline
 from urllib.parse import quote
 import math
 
-BASE_URL = "https://api.mapbox.com/styles/v1/mapbox/streets-v12/static"
+_STYLE_ROOT = "https://api.mapbox.com/styles/v1/mapbox"
+DEFAULT_STYLE = "streets-v12"
+BASE_URL = f"{_STYLE_ROOT}/{DEFAULT_STYLE}/static"
+
+
+def _base_url(style=None):
+    """Static-image endpoint for a Mapbox style.
+
+    streets-v12 is the right default for a position card, but its yellow road
+    casings sit right on top of the low-altitude end of the track gradient, so
+    a coloured track over a dense street map can be genuinely hard to pick out.
+    Callers drawing a track as the subject of the image should pass a muted
+    style such as "light-v11".
+    """
+    return f"{_STYLE_ROOT}/{style or DEFAULT_STYLE}/static"
 
 
 def compute_zoom(points, width=600, height=400, padding_km=25, min_zoom=4, max_zoom=15):
@@ -138,7 +152,7 @@ def polygon_layer(ring, stroke="f43f5e", stroke_width=2, stroke_opacity=0.9,
 async def generate_map_image(center_lat, center_lon, pins=None,
                              path_coords=None, path_altitudes=None,
                              zoom=None, width=600, height=400,
-                             underlays=None):
+                             underlays=None, style=None):
     """Render a Mapbox static image, or None if one can't be produced.
 
     Always returns BytesIO or None -- never an error string. The request URL
@@ -191,7 +205,7 @@ async def generate_map_image(center_lat, center_lon, pins=None,
 
     layer_str = ",".join(layers)
     url = (
-        f"{BASE_URL}/{layer_str}/{center_lon},{center_lat},{zoom}/{width}x{height}"
+        f"{_base_url(style)}/{layer_str}/{center_lon},{center_lat},{zoom}/{width}x{height}"
         f"?access_token={MAPBOX}"
     )
 
