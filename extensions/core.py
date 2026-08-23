@@ -294,7 +294,16 @@ class Core(commands.Cog):
         await self._install_requirements_if_needed(ctx)
 
         await ctx.send("Updating and restarting...")
-        await self.bot.close()
+        # Exit non-zero so the supervisor brings us back up. bot.close() on its
+        # own lets main() return with status 0, which Restart=on-failure reads
+        # as a clean finish -- so !restart pulled the new code and then left
+        # the bot down until someone started it by hand.
+        #
+        # !shutdown keeps the clean exit on purpose: that is the difference
+        # between "restart me" and "stop me", and it is what lets the unit stay
+        # on Restart=on-failure rather than Restart=always (which would make
+        # !shutdown impossible).
+        os._exit(1)
 
 
 async def setup(bot):
