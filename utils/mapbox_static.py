@@ -129,9 +129,21 @@ def _altitude_colored_path_layers(path_coords, path_altitudes):
             segments.append([color, [path_coords[i], path_coords[i + 1]]])
 
     for color, pts in segments:
-        encoded = _encode_path(pts)
-        layers.append(f"path-3+{color}-0.9({encoded})")
+        layers.append(path_layer(pts, color=color))
     return layers
+
+
+def path_layer(coords, color="ff0000", width=3, opacity=0.9):
+    """Encode an open (lat, lon) path as a stroked Mapbox overlay.
+
+    The line counterpart to polygon_layer(). For callers that need a stretch
+    of track drawn in one fixed colour -- a leg inside restricted airspace,
+    say -- rather than shaded by altitude.
+    """
+    if not coords or len(coords) < 2:
+        return None
+    encoded = _encode_path([(float(a), float(b)) for a, b in coords])
+    return f"path-{width}+{color}-{opacity}({encoded})"
 
 
 def polygon_layer(ring, stroke="f43f5e", stroke_width=2, stroke_opacity=0.9,
@@ -152,7 +164,8 @@ def polygon_layer(ring, stroke="f43f5e", stroke_width=2, stroke_opacity=0.9,
 async def generate_map_image(center_lat, center_lon, pins=None,
                              path_coords=None, path_altitudes=None,
                              zoom=None, width=600, height=400,
-                             underlays=None, style=None, path_casing=False):
+                             underlays=None, overlays=None, style=None,
+                             path_casing=False):
     """Render a Mapbox static image, or None if one can't be produced.
 
     Always returns BytesIO or None -- never an error string. The request URL
@@ -189,6 +202,11 @@ async def generate_map_image(center_lat, center_lon, pins=None,
         else:
             encoded = _encode_path(path_coords)
             layers.append(f"path-3+0000ff-0.9({encoded})")
+
+    # Overlays render after the track and before the pins, so a caller can
+    # repaint a stretch of it -- the altitude gradient still draws underneath,
+    # which is what keeps the two ends of a highlighted leg joined up.
+    layers.extend(l for l in (overlays or []) if l)
 
     # Add pins
     if pins:
