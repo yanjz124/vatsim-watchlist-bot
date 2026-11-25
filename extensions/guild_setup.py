@@ -190,6 +190,9 @@ class GuildSetup(commands.Cog):
 
     # === prefix twins ===
 
+    # Prefix twin of the /setchannel app command above. Deliberately NOT
+    # hybrid: that would register a second /setchannel and the tree
+    # rejects the duplicate, taking this whole cog down with it.
     @commands.command(name="setchannel")
     @commands.guild_only()
     @commands.has_permissions(manage_guild=True)
@@ -203,12 +206,18 @@ class GuildSetup(commands.Cog):
         set_alert_channel(ctx.guild.id, channel.id)
         await ctx.send(f"Alerts will post in {channel.mention}.")
 
+    # Prefix twin of the /config app command above. Deliberately NOT
+    # hybrid: that would register a second /config and the tree
+    # rejects the duplicate, taking this whole cog down with it.
     @commands.command(name="config")
     @commands.guild_only()
     async def config_prefix(self, ctx):
         """Show this server's alert channel and feed subscriptions."""
         await ctx.send(embed=_config_embed(ctx.guild, get_alert_channel_id(ctx.guild.id)))
 
+    # Prefix twin of the /feeds app command above. Deliberately NOT
+    # hybrid: that would register a second /feeds and the tree
+    # rejects the duplicate, taking this whole cog down with it.
     @commands.command(name="feeds")
     @commands.guild_only()
     async def feeds_prefix(self, ctx, feed: str = None, state: str = None):
@@ -234,7 +243,7 @@ class GuildSetup(commands.Cog):
         set_feed_enabled(ctx.guild.id, feed, enabled)
         await ctx.send(f"Feed **{feed}** is now **{'on' if enabled else 'off'}** for this server.")
 
-    @commands.command(name="invite")
+    @commands.hybrid_command(name="invite")
     async def invite(self, ctx):
         """Get an invite link for this bot."""
         if self.bot.user is None:

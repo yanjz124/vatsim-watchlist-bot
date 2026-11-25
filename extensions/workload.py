@@ -406,7 +406,7 @@ class WorkloadMonitor(commands.Cog):
 
     # ── commands ──────────────────────────────────────────────────────────────
 
-    @commands.command(name="wl", aliases=["workload"])
+    @commands.hybrid_command(name="wl", aliases=["workload"])
     async def wl_cmd(self, ctx, *, arg: str = ""):
         """
         Show current vNAS controller workload.
@@ -446,7 +446,7 @@ class WorkloadMonitor(commands.Cog):
         for embed in _table_embeds(controllers, self.threshold_for(ctx.guild.id), filter_label=filter_label):
             await ctx.send(embed=embed)
 
-    @commands.command(name="wlmon")
+    @commands.hybrid_command(name="wlmon")
     async def wlmon_cmd(self, ctx, arg: str = ""):
         """
         Control the workload monitor.
@@ -518,7 +518,7 @@ class WorkloadMonitor(commands.Cog):
                 )
 
 
-    @commands.command(name="wlstats")
+    @commands.hybrid_command(name="wlstats")
     async def wlstats_cmd(self, ctx, *, arg: str = ""):
         """
         Show workload alert trigger statistics.

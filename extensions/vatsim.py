@@ -92,7 +92,7 @@ class Vatsim(commands.Cog):
             else:
                 return None
 
-    @commands.command()
+    @commands.hybrid_command()
     async def cid(self, ctx, cid: int):
         """Get VATSIM user info by CID"""
         url = f"https://api.vatsim.net/api/ratings/{cid}/"
@@ -182,7 +182,7 @@ class Vatsim(commands.Cog):
 
         await self.usa(ctx, cid)
 
-    @commands.command()
+    @commands.hybrid_command()
     async def usa(self, ctx, cid: int):
         """Get VATUSA user info by CID"""
         url = f"https://api.vatusa.net/user/{cid}"
@@ -304,7 +304,7 @@ class Vatsim(commands.Cog):
 
         await ctx.send(embed=embed2)
 
-    @commands.command()
+    @commands.hybrid_command()
     async def lname(self, ctx, lastname: str, page: int = 1):
         """Search VATSIM users by last name"""
         users_per_page = 25
@@ -342,7 +342,7 @@ class Vatsim(commands.Cog):
                     embed.add_field(name=full_name, value=f"CID: {user['cid']}", inline=False)
                 await ctx.send(embed=embed)
 
-    @commands.command()
+    @commands.hybrid_command()
     async def vatis(self, ctx, icao: str):
         """Get VATSIM ATIS for an airport"""
         async with aiohttp.ClientSession() as session:
@@ -376,7 +376,7 @@ class Vatsim(commands.Cog):
             embed.set_footer(text=f"Freq: {frequency}")
             await ctx.send(embed=embed)
 
-    @commands.command()
+    @commands.hybrid_command()
     async def sup(self, ctx):
         """List online VATSIM supervisors"""
 
@@ -419,7 +419,7 @@ class Vatsim(commands.Cog):
 
         await ctx.send(embed=embed)
 
-    @commands.command()
+    @commands.hybrid_command()
     async def status(self, ctx, cid: int):
         """Check online status of a VATSIM user"""
         datafeed_url = "https://data.vatsim.net/v3/vatsim-data.json"
@@ -472,7 +472,7 @@ class Vatsim(commands.Cog):
                 else:
                     await ctx.send(embed=embed)
 
-    @commands.command()
+    @commands.hybrid_command()
     async def stats(self, ctx, cid: int):
         """Get VATSIM statistics for a user"""
         url = f"https://api.vatsim.net/v2/members/{cid}/stats"
@@ -516,7 +516,7 @@ class Vatsim(commands.Cog):
 
         await ctx.send(embed=embed)
 
-    @commands.command(name="callsign")
+    @commands.hybrid_command(name="callsign")
     async def callsign_lookup(self, ctx, callsign: str):
         """Look up a VATSIM callsign with location. Usage: !callsign <callsign>"""
         callsign = callsign.upper()
@@ -576,7 +576,7 @@ class Vatsim(commands.Cog):
             print(f"Error in !callsign: {e}")
             await ctx.send("Failed to fetch callsign data.")
 
-    @commands.command(name="com")
+    @commands.hybrid_command(name="com")
     async def get_com_frequencies(self, ctx, callsign: Optional[str] = None):
         """Get frequencies for a VATSIM callsign. Usage: !com <callsign>"""
         if not callsign:
@@ -599,7 +599,7 @@ class Vatsim(commands.Cog):
         except Exception as e:
             await ctx.send(f"Error fetching data: {e}")
 
-    @commands.command()
+    @commands.hybrid_command()
     async def faclist(self, ctx):
         """Get list of all VATUSA facilities"""
         async with aiohttp.ClientSession() as session:
@@ -679,7 +679,7 @@ class Vatsim(commands.Cog):
                 for emb in embeds:
                     await ctx.send(embed=emb)
 
-    @commands.command()
+    @commands.hybrid_command()
     async def facinfo(self, ctx, facility_id: str):
         """Get info for a VATUSA facility (e.g. ZDC)"""
         if not facility_id:
@@ -742,15 +742,15 @@ class Vatsim(commands.Cog):
             for emb in embeds:
                 await ctx.send(embed=emb)
 
-    @commands.command()
-    async def facroster(self, ctx, *args):
+    @commands.hybrid_command()
+    async def facroster(self, ctx, facility_id: str = None, roster_type: str = "home"):
         """Get VATUSA facility roster. Usage: !facroster <facility_id> [home/visit/both]"""
-        if len(args) == 0:
+        if facility_id is None:
             await ctx.send("Usage: `!facroster [FACILITY_ID] [home/visit/both]`\nExample: `!facroster ZDC home`")
             return
 
-        facility_id = args[0].upper()
-        roster_type = args[1].lower() if len(args) > 1 else "home"
+        facility_id = facility_id.upper()
+        roster_type = roster_type.lower()
 
         if roster_type not in ["home", "visit", "both"]:
             await ctx.send("Usage: `!facroster [FACILITY_ID] [home/visit/both]`")
@@ -813,7 +813,7 @@ class Vatsim(commands.Cog):
         for embed in embeds:
             await ctx.send(embed=embed)
 
-    @commands.command()
+    @commands.hybrid_command()
     async def metar(self, ctx, icao: str):
         """Get METAR for an airport"""
         icao = icao.upper()

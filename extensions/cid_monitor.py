@@ -10,7 +10,7 @@ class Cidmon(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.group(
+    @commands.hybrid_group(
         name="cidmon",
         invoke_without_command=True,
         case_insensitive=True
@@ -21,6 +21,7 @@ class Cidmon(commands.Cog):
 
     @cidmon.command(name="add")
     async def add(self, ctx, *, entries: str):
+        """Watch one or more CIDs (comma-separated)."""
         chunks = [e.strip() for e in entries.split(',') if e.strip()]
 
         for i, chunk in enumerate(chunks):
@@ -59,11 +60,13 @@ class Cidmon(commands.Cog):
 
     @cidmon.command(name="remove")
     async def monitor_remove(self, ctx, cid: int):
+        """Stop watching a CID."""
         remove_cid_from_monitor(ctx.guild.id, cid)
         await ctx.send(f"Removed CID `{cid}` from monitoring.")
 
     @cidmon.command(name="list")
     async def list(self, ctx):
+        """Show every CID on this server's watch list."""
         try:
             cid_map = get_cid_to_monitor(ctx.guild.id)
             if not cid_map:

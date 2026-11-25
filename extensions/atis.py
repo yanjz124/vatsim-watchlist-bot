@@ -12,7 +12,7 @@ class Atis(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command()
+    @commands.hybrid_command()
     async def atis(self, ctx, icao: str = None):
         """Get real-world ATIS for an airport"""
         if not icao:
@@ -81,7 +81,7 @@ class Atis(commands.Cog):
             embed.set_footer(text=f"Updated: {updated_display}")
             await ctx.send(embed=embed)
 
-    @commands.group(
+    @commands.hybrid_group(
         name="atismon",
         invoke_without_command=True,
         case_insensitive=True

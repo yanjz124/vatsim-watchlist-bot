@@ -15,7 +15,7 @@ class NewCidMonitor(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
     
-    @commands.command(name="newcid")
+    @commands.hybrid_command(name="newcid")
     async def newcid_command(self, ctx, action: Optional[str] = None):
         """View highest CID and manage alerts. Usage: !newcid [mute/unmute]"""
         # Get the NewCidMonitorLoop cog

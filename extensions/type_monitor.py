@@ -12,7 +12,7 @@ class Typemon(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.group(
+    @commands.hybrid_group(
         name="typemon",
         invoke_without_command=True,
         case_insensitive=True
@@ -26,6 +26,7 @@ class Typemon(commands.Cog):
 
     @typemon.command(name="add")
     async def add(self, ctx, *, entry: str):
+        """Watch an aircraft type pattern, e.g. B738 or A320*."""
         parts = entry.strip().split()
         if not parts:
             await ctx.send("Please provide an aircraft type pattern (e.g., `B738`, `A320*`, etc.).")
@@ -38,11 +39,13 @@ class Typemon(commands.Cog):
 
     @typemon.command(name="remove")
     async def remove(self, ctx, pattern: str):
+        """Stop watching an aircraft type pattern."""
         remove_type_monitor(ctx.guild.id, pattern.upper())
         await ctx.send(f"Removed aircraft type `{pattern}` from monitoring.")
 
     @typemon.command(name="list")
     async def list(self, ctx):
+        """Show every aircraft type being watched."""
         try:
             rule_map = load_type_monitor(ctx.guild.id)
             if not rule_map:

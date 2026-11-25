@@ -136,7 +136,7 @@ class FAAAdvMonitor(commands.Cog):
                     except Exception as e:
                         print(f"FAA monitor: failed to send embed to guild {guild_id}: {e}")
 
-    @commands.command(name="faaadv")
+    @commands.hybrid_command(name="faaadv")
     async def faaadv(self, ctx, mode: Optional[str] = None, limit: int = 5):
         """Fetch FAA advisories and post them as embeds.
 

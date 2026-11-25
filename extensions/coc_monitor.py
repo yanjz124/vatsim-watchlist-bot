@@ -15,7 +15,7 @@ class CocMonitor(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         
-    @commands.command(name="cocmonitor")
+    @commands.hybrid_command(name="cocmonitor")
     async def coc_monitor_toggle(self, ctx, state: Optional[str] = None):
         """Toggle VATSIM CoC real-time monitoring. Usage: !cocmonitor [on/off]"""
         # Get the CocMonitorLoop cog
@@ -40,7 +40,7 @@ class CocMonitor(commands.Cog):
         else:
             await ctx.send("Invalid option. Use `!cocmonitor on` or `!cocmonitor off`.")
     
-    @commands.command(name="cocreset")
+    @commands.hybrid_command(name="cocreset")
     async def coc_reset(self, ctx):
         """Reset CoC monitor alert cache"""
         coc_loop = self.bot.get_cog("CocMonitorLoop")
@@ -54,7 +54,7 @@ class CocMonitor(commands.Cog):
         coc_loop.alerted_users -= mine
         await ctx.send(f"CoC monitor alert cache cleared. ({count} entries removed) Will re-alert for any current violations on next scan.")
 
-    @commands.command(name="a4check")
+    @commands.hybrid_command(name="a4check")
     async def a4_check(self, ctx):
         """Check for VATSIM CoC A4 name violations"""
         await ctx.send("Checking for CoC A4 name violations...")
@@ -72,7 +72,7 @@ class CocMonitor(commands.Cog):
             await ctx.send(f"Error checking CoC violations: {e}")
             print(f"Error in a4check: {e}")
     
-    @commands.command(name="fakename")
+    @commands.hybrid_command(name="fakename")
     async def manage_fake_names(self, ctx, action: Optional[str] = None, *, pattern: Optional[str] = None):
         """Manage fake name patterns. Usage: !fakename [add/remove/list] [pattern]"""
         if action is None:
@@ -119,7 +119,7 @@ class CocMonitor(commands.Cog):
         else:
             await ctx.send("Invalid action. Use `add`, `remove`, or `list`.")
 
-    @commands.command(name="a1mon")
+    @commands.hybrid_command(name="a1mon")
     async def a1_monitor_command(self, ctx, action: Optional[str] = None, *, keyword: Optional[str] = None):
         """Manage A1 keyword monitoring. Usage: !a1mon [add/remove/list] [keyword]"""
         
@@ -174,7 +174,7 @@ class CocMonitor(commands.Cog):
         else:
             await ctx.send("Invalid action. Use `add`, `remove`, or `list`.")
 
-    @commands.command(name="a4mon")
+    @commands.hybrid_command(name="a4mon")
     async def a4_monitor_command(self, ctx, action: Optional[str] = None):
         """Toggle A4 violation alerts. Usage: !a4mon [mute/unmute/on/off/status]"""
         coc_loop = self.bot.get_cog("CocMonitorLoop")
@@ -200,7 +200,7 @@ class CocMonitor(commands.Cog):
         else:
             await ctx.send("Invalid option. Use `!a4mon mute`, `!a4mon unmute`, or `!a4mon status`.")
 
-    @commands.command(name="a9mon")
+    @commands.hybrid_command(name="a9mon")
     async def a9_monitor_command(self, ctx, action: Optional[str] = None, *, keyword: Optional[str] = None):
         """Manage A9 keyword monitoring. Usage: !a9mon [add/remove/list] [keyword]"""
         

@@ -90,7 +90,7 @@ class SystemStats(commands.Cog):
         result["net_total_recv"] = snap2.bytes_recv
         return result
 
-    @commands.command(name="sys", aliases=["piusage", "sysstats", "sysinfo"])
+    @commands.hybrid_command(name="sys", aliases=["piusage", "sysstats", "sysinfo"])
     async def sys(self, ctx: commands.Context):
         """Show host resource usage: CPU, memory, disk, network, uptime and top processes.
 

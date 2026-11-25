@@ -18,7 +18,7 @@ class Csmon(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.group(
+    @commands.hybrid_group(
         name="csmon",
         invoke_without_command=True,
         case_insensitive=True
@@ -32,6 +32,7 @@ class Csmon(commands.Cog):
 
     @csmon.command(name="add")
     async def add(self, ctx, *, entry: str):
+        """Watch a callsign pattern, e.g. CXK* or ATL_*."""
         parts = entry.strip().split()
         if not parts:
             await ctx.send("Please provide a callsign pattern (e.g., `CXK*`, `ATL_*`, etc.).")
@@ -44,11 +45,13 @@ class Csmon(commands.Cog):
 
     @csmon.command(name="remove")
     async def remove(self, ctx, rule: str):
+        """Stop watching a callsign pattern."""
         remove_callsign_monitor(ctx.guild.id, rule.upper())
         await ctx.send(f"Removed callsign rule `{rule}` from monitoring.")
 
     @csmon.command(name="list")
     async def list(self, ctx):
+        """Show every callsign pattern being watched."""
         try:
             rule_map = load_callsign_monitor(ctx.guild.id)
             if not rule_map:
@@ -85,8 +88,8 @@ class Csmute(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @commands.command(name="csmute")
-    async def csmute(self, ctx, *args):
+    @commands.hybrid_command(name="csmute")
+    async def csmute(self, ctx, callsign: str = None, hours: str = None):
         """Mute callsigns (supports `*` wildcards) from triggering csmon notifications.
 
         Usage:
@@ -95,11 +98,11 @@ class Csmute(commands.Cog):
           !csmute CALLSIGN <hours> — mute for <hours>; 0 or negative = permanent
           !csmute -CALLSIGN        — unmute
         """
-        if not args:
+        if callsign is None:
             await self._send_list(ctx)
             return
 
-        target = args[0]
+        target = callsign
         if target.startswith("-") and len(target) > 1:
             pattern = target[1:].upper()
             if remove_callsign_mute(ctx.guild.id, pattern):
@@ -109,15 +112,17 @@ class Csmute(commands.Cog):
             return
 
         pattern = target.upper()
-        hours = 24
-        if len(args) > 1:
+        # Parsed from a string rather than taken as an int parameter, so the
+        # error stays this message instead of discord.py's BadArgument.
+        duration = 24
+        if hours is not None:
             try:
-                hours = int(args[1])
+                duration = int(hours)
             except ValueError:
-                await ctx.send(f"Invalid duration `{args[1]}` — expected an integer (hours).")
+                await ctx.send(f"Invalid duration `{hours}` — expected an integer (hours).")
                 return
 
-        pat, expires_at = add_callsign_mute(ctx.guild.id, pattern, hours)
+        pat, expires_at = add_callsign_mute(ctx.guild.id, pattern, duration)
         if expires_at is None:
             await ctx.send(f"Muted `{pat}` **permanently**.")
         else:

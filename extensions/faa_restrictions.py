@@ -129,16 +129,11 @@ class FAARestrictions(commands.Cog):
 
         return parsed_rows
 
-    @commands.command(name="faares")
-    async def faares(self, ctx, *args):
+    @commands.hybrid_command(name="faares")
+    async def faares(self, ctx, requesting: str = "ALL", providing: str = "ALL"):
         """Fetch FAA restrictions (compact output)."""
-        req = "ALL"
-        prov = "ALL"
-        if len(args) == 1:
-            req = args[0].upper()
-        elif len(args) >= 2:
-            req = args[0].upper()
-            prov = args[1].upper()
+        req = requesting.upper()
+        prov = providing.upper()
 
         try:
             parsed = await self._get_parsed_rows(req, prov)
@@ -228,8 +223,8 @@ class FAARestrictions(commands.Cog):
                 except Exception as e:
                     print(f"FAA monitor send error: {e}")
 
-    @commands.command(name="faaresmon")
-    async def faaresmon(self, ctx, *args):
+    @commands.hybrid_command(name="faaresmon")
+    async def faaresmon(self, ctx, requesting: str = "ALL", providing: str = "ALL"):
         """Start/stop a per-minute FAA restrictions monitor.
 
         Usage:
@@ -237,8 +232,9 @@ class FAARestrictions(commands.Cog):
           `!faaresmon ZDC PCT` -> start monitor requesting ZDC, providing PCT
           `!faaresmon STOP` -> stop monitor
         """
-        # stop case
-        if len(args) == 1 and args[0].upper() in ("STOP", "OFF", "END", "CANCEL"):
+        # stop case: the stop word on its own, nothing in `providing`
+        if (requesting.upper() in ("STOP", "OFF", "END", "CANCEL")
+                and providing.upper() == "ALL"):
             if getattr(self, "_faa_monitor_loop", None) and self._faa_monitor_loop.is_running():
                 self._faa_monitor_loop.cancel()
                 self._faa_monitor_seen.clear()
@@ -249,13 +245,8 @@ class FAARestrictions(commands.Cog):
                 await ctx.send("No FAA restrictions monitor is running.")
             return
 
-        req = "ALL"
-        prov = "ALL"
-        if len(args) == 1:
-            req = args[0].upper()
-        elif len(args) >= 2:
-            req = args[0].upper()
-            prov = args[1].upper()
+        req = requesting.upper()
+        prov = providing.upper()
 
         if getattr(self, "_faa_monitor_loop", None) and self._faa_monitor_loop.is_running():
             await ctx.send("A FAA restrictions monitor is already running. Stop it first with `!faaresmon STOP`.")
