@@ -7,11 +7,15 @@ are exposed as slash commands so they are discoverable from Discord's own
 command picker; each one has a `!` twin for consistency with the rest.
 """
 
+import hashlib
+import json
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import CHANNEL_ID
+from config import ADMIN_ID, CHANNEL_ID
+from utils.data_manager import load_json, save_json
 from utils import (
     FEEDS,
     get_alert_channel_id,
@@ -23,6 +27,45 @@ from utils import (
     migrate_flat_files_to_guild,
     purge_guild,
 )
+
+
+SYNC_STATE_FILE = "slash_sync.json"
+
+
+def _tree_signature(tree):
+    """Fingerprint what a sync would publish, so an unchanged tree can skip it.
+
+    Built from the fields Discord actually stores -- names, descriptions and
+    each option's name/type/required/choices -- so an edit to any of them
+    changes the hash and a pure code change does not.
+    """
+    def describe(cmd):
+        if isinstance(cmd, app_commands.Group):
+            return {
+                "name": cmd.name,
+                "description": cmd.description,
+                "subcommands": sorted((describe(c) for c in cmd.commands),
+                                      key=lambda d: d["name"]),
+            }
+        return {
+            "name": cmd.name,
+            "description": cmd.description,
+            "options": [
+                {
+                    "name": p.name,
+                    "type": str(p.type),
+                    "required": p.required,
+                    "description": p.description,
+                    "choices": [str(c.value) for c in (p.choices or [])],
+                }
+                for p in cmd.parameters
+            ],
+        }
+
+    payload = sorted((describe(c) for c in tree.get_commands()),
+                     key=lambda d: d["name"])
+    blob = json.dumps(payload, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 def _config_embed(guild, channel_id):
@@ -67,11 +110,47 @@ class GuildSetup(commands.Cog):
         if adopted:
             migrate_flat_files_to_guild(adopted)
 
+        await self.sync_if_changed()
+
+    async def sync_if_changed(self, force=False):
+        """Publish slash commands, but only when they actually differ.
+
+        on_ready fires on every reconnect, not just at boot, and a sync is a
+        rate-limited write of the whole command set -- so doing it on each one
+        spends an API call to tell Discord what it already knows. Compare a
+        fingerprint of the tree against the last published one instead, and
+        sync only on a real change. !synccommands forces it when Discord's
+        copy has drifted from ours.
+        """
+        signature = _tree_signature(self.bot.tree)
+        state = load_json(SYNC_STATE_FILE)
+        if not force and state.get("signature") == signature:
+            print(f"[guild_setup] slash commands unchanged "
+                  f"({state.get('count', '?')} published) -- no sync needed")
+            return None
+
         try:
             synced = await self.bot.tree.sync()
-            print(f"[guild_setup] synced {len(synced)} slash command(s)")
         except Exception as e:
+            # Leave the stored signature alone so the next ready retries.
             print(f"[guild_setup] slash command sync failed: {e}")
+            return None
+
+        save_json(SYNC_STATE_FILE, {"signature": signature, "count": len(synced)})
+        print(f"[guild_setup] synced {len(synced)} slash command(s)")
+        return synced
+
+    @commands.command(name="synccommands")
+    async def synccommands(self, ctx):
+        """Force a slash command sync (admin only)."""
+        if ctx.author.id != ADMIN_ID:
+            await ctx.send("Unauthorized.")
+            return
+        synced = await self.sync_if_changed(force=True)
+        if synced is None:
+            await ctx.send("Sync failed — check the logs.")
+        else:
+            await ctx.send(f"Published {len(synced)} slash command(s).")
 
     @commands.Cog.listener()
     async def on_guild_join(self, guild):
